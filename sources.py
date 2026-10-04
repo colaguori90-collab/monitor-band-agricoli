@@ -911,4 +911,13 @@ FONTI_HTML = {
         "url": "https://svilupporurale.regione.sicilia.it/categoria/news/bandi-aperti/",
         "estrattore": estrai_sicilia,
     },
+    "Marche": {
+        "url": "https://www.regione.marche.it/Regione-Utile/Agricoltura-Sviluppo-Rurale-e-Pesca/Bandi-di-finanziamento",
+        "estrattore": estrai_marche,
+    },
+    "Valle d'Aosta": {
+        "url": "https://www.regione.vda.it/agricoltura/CSR_2023_2027/bandi_interventi_strutturali/default_i.aspx",
+        "estrattore": estrai_valle_daosta,
+    },
 }
+
