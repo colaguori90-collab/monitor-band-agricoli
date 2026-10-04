@@ -4,10 +4,6 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 
 
-# ============================================================
-# IMPOSTAZIONI GENERALI
-# ============================================================
-
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -16,6 +12,7 @@ HEADERS = {
     ),
     "Accept-Language": "it-IT,it;q=0.9,en;q=0.8",
 }
+
 
 PAROLE_ESCLUSE = (
     "graduatoria",
@@ -64,6 +61,7 @@ PAROLE_ESCLUSE = (
     "bandi chiusi",
 )
 
+
 PAROLE_AGRICOLTURA = (
     "agricolt",
     "rurale",
@@ -84,19 +82,6 @@ PAROLE_AGRICOLTURA = (
     "srh",
 )
 
-STATI_AMMESSI = (
-    "aperto",
-    "aperti",
-    "in corso",
-    "in apertura",
-    "prossima apertura",
-    "sportello aperto",
-)
-
-
-# ============================================================
-# FUNZIONI DI SUPPORTO
-# ============================================================
 
 def pulisci_testo(testo):
     return re.sub(r"\s+", " ", testo or "").strip()
@@ -110,11 +95,6 @@ def contiene_esclusioni(testo):
 def riguarda_agricoltura(testo):
     testo = (testo or "").lower()
     return any(parola in testo for parola in PAROLE_AGRICOLTURA)
-
-
-def stato_ammesso(testo):
-    testo = (testo or "").lower()
-    return any(stato in testo for stato in STATI_AMMESSI)
 
 
 def cerca_scadenza(testo):
@@ -131,7 +111,7 @@ def cerca_scadenza(testo):
     match = re.search(
         rf"(scadenza|entro|chiude|termine).{{0,100}}?({pattern_num}|{pattern_testo})",
         testo,
-        flags=re.IGNORECASE
+        flags=re.IGNORECASE,
     )
 
     if match:
@@ -154,7 +134,7 @@ def crea_record(
     url,
     testo="",
     stato="Aperto",
-    categoria="CSR / Sviluppo rurale"
+    categoria="CSR / Sviluppo rurale",
 ):
     return {
         "regione": regione,
@@ -184,17 +164,14 @@ def elimina_duplicati(bandi):
     return risultati
 
 
-# ============================================================
-# CAMPANIA
-# ============================================================
-
 def estrai_campania(html_pagina, url_base):
     """
-    Legge solo la tabella nella sezione id="csr".
-    Ogni riga contiene:
-    - cella 1: titolo bando;
-    - cella 2: scadenza;
-    - cella 3: link "Vai alla pagina".
+    Campania:
+    legge esclusivamente la tabella contenuta nella sezione id="csr".
+    Per ogni riga usa:
+    - prima cella: titolo;
+    - seconda cella: scadenza;
+    - terza cella: link diretto.
     """
     soup = BeautifulSoup(html_pagina, "lxml")
     risultati = []
@@ -235,7 +212,7 @@ def estrai_campania(html_pagina, url_base):
             url,
             scadenza,
             stato="Aperto",
-            categoria="CSR 2023-2027"
+            categoria="CSR 2023-2027",
         )
 
         record["scadenza"] = scadenza or "non specificata"
@@ -245,22 +222,14 @@ def estrai_campania(html_pagina, url_base):
     return elimina_duplicati(risultati)
 
 
-# ============================================================
-# BASILICATA
-# ============================================================
-
 def estrai_basilicata(html_pagina, url_base):
     """
-    Cerca esclusivamente i bandi pubblicati dopo la dicitura
-    'Bandi in corso'. I bandi sono spesso scritti in un <li>,
-    mentre il relativo link è un PDF oppure un pulsante data-url.
-
-    Non cerca link nel blocco successivo: in questo modo non associa
-    mai un bando ad una pagina errata.
+    Basilicata:
+    legge solo i bandi pubblicati dopo 'Bandi in corso'.
+    Ogni record deve avere un PDF o un pulsante data-url nello stesso blocco.
     """
     soup = BeautifulSoup(html_pagina, "lxml")
     risultati = []
-
     punto_inizio = None
 
     for tag in soup.find_all(["p", "strong", "b", "h1", "h2", "h3", "h4"]):
@@ -284,12 +253,10 @@ def estrai_basilicata(html_pagina, url_base):
             break
 
         if nodo.name == "ul":
-            elementi_principali = nodo.find_all("li", recursive=False)
+            elementi = nodo.find_all("li", recursive=False)
 
-            if elementi_principali:
-                titolo = pulisci_testo(
-                    elementi_principali[0].get_text(" ", strip=True)
-                )
+            if elementi:
+                titolo = pulisci_testo(elementi[0].get_text(" ", strip=True))
 
                 if len(titolo) < 25:
                     titolo = testo_nodo
@@ -314,7 +281,6 @@ def estrai_basilicata(html_pagina, url_base):
                 ):
                     link_scelto = None
 
-                    # Prima scelta: link/PDF chiamato Bando.
                     for link in nodo.find_all("a", href=True):
                         href = link.get("href", "").lower()
                         testo_link = pulisci_testo(
@@ -325,7 +291,6 @@ def estrai_basilicata(html_pagina, url_base):
                             link_scelto = link
                             break
 
-                    # Seconda scelta: il primo PDF nel medesimo blocco.
                     if not link_scelto:
                         for link in nodo.find_all("a", href=True):
                             href = link.get("href", "").lower()
@@ -344,8 +309,6 @@ def estrai_basilicata(html_pagina, url_base):
                         if bottone:
                             url = urljoin(url_base, bottone["data-url"])
 
-                    # Se manca un collegamento nello stesso blocco,
-                    # il record non viene inserito.
                     if url:
                         risultati.append(
                             crea_record(
@@ -354,7 +317,7 @@ def estrai_basilicata(html_pagina, url_base):
                                 url,
                                 titolo,
                                 stato="Aperto",
-                                categoria="Agricoltura / Sviluppo rurale"
+                                categoria="Agricoltura / Sviluppo rurale",
                             )
                         )
 
@@ -364,19 +327,15 @@ def estrai_basilicata(html_pagina, url_base):
     return elimina_duplicati(risultati)
 
 
-# ============================================================
-# PIEMONTE
-# ============================================================
-
 def estrai_piemonte(html_pagina, url_base):
     """
-    Prende solo link alle singole schede ufficiali
-    bandi.regione.piemonte.it, con titolo agricolo/CSR.
+    Piemonte:
+    estrae solo schede singole dal dominio bandi.regione.piemonte.it.
     """
     soup = BeautifulSoup(html_pagina, "lxml")
     risultati = []
 
-    parole_agricole_specifiche = (
+    parole_agricole = (
         "csr",
         "psr",
         "srd",
@@ -406,11 +365,11 @@ def estrai_piemonte(html_pagina, url_base):
         if "bandi.regione.piemonte.it" not in url:
             continue
 
-        if not any(parola in titolo_basso for parola in parole_agricole_specifiche):
+        if not any(parola in titolo_basso for parola in parole_agricole):
             continue
 
         if (
-            url.rstrip("/") == "https://bandi.regione.piemonte.it/contributi-finanziamenti"
+            url.rstrip() == "https://bandi.regione.piemonte.it/contributi-finanziamenti"
             or "archivio" in url.lower()
             or "categorie" in url.lower()
         ):
@@ -440,23 +399,19 @@ def estrai_piemonte(html_pagina, url_base):
                 url,
                 testo_vicino,
                 stato="Aperto",
-                categoria="CSR / Agricoltura"
+                categoria="CSR / Agricoltura",
             )
         )
 
     return elimina_duplicati(risultati)
 
 
-# ============================================================
-# PUGLIA
-# ============================================================
-
 def estrai_puglia(html_pagina, url_base):
     """
-    CSR Puglia:
-    ogni singolo bando è un tag <a class="as-card">.
-    La card contiene stato, categoria, codice, titolo e descrizione.
-    Include solo Aperto, In apertura e Prossima apertura.
+    Puglia:
+    ogni bando è una card <a class="as-card">.
+    La funzione estrae lo stato, il codice SR*, il titolo e il link diretto.
+    Rimuove i codici colore tecnici dei div nascosti.
     """
     soup = BeautifulSoup(html_pagina, "lxml")
     risultati = []
@@ -497,19 +452,32 @@ def estrai_puglia(html_pagina, url_base):
         if len(titolo) < 15:
             continue
 
-        tag_categorie = [
-            pulisci_testo(tag.get_text(" ", strip=True))
-            for tag in card.select(".category-tag")
-        ]
+        tag_categorie = []
+
+        for tag in card.select(".category-tag"):
+            copia_tag = BeautifulSoup(str(tag), "lxml")
+
+            for elemento in copia_tag.select(".as-tag-to-get-color"):
+                elemento.decompose()
+
+            testo_tag = pulisci_testo(
+                copia_tag.get_text(" ", strip=True)
+            )
+
+            if testo_tag:
+                tag_categorie.append(testo_tag)
 
         codice = ""
         categoria = "CSR 2023-2027"
 
         for tag in tag_categorie:
-            if re.search(r"\bSR[A-Z]?\d{2}", tag, flags=re.IGNORECASE):
-                codice = tag
-            elif len(tag) > 3:
-                categoria = f"CSR 2023-2027 – {tag}"
+            tag_pulito = re.sub(r"<[^>]+>", "", tag)
+            tag_pulito = pulisci_testo(tag_pulito)
+
+            if re.search(r"\bSR[A-Z]?\d{2}", tag_pulito, flags=re.IGNORECASE):
+                codice = tag_pulito
+            elif len(tag_pulito) > 3:
+                categoria = f"CSR 2023-2027 – {tag_pulito}"
 
         if codice and codice.lower() not in titolo.lower():
             titolo = f"{codice} – {titolo}"
@@ -533,7 +501,7 @@ def estrai_puglia(html_pagina, url_base):
                 url,
                 testo_card,
                 stato=stato,
-                categoria=categoria
+                categoria=categoria,
             )
         )
 
@@ -541,19 +509,16 @@ def estrai_puglia(html_pagina, url_base):
     return elimina_duplicati(risultati)
 
 
-# ============================================================
-# LOMBARDIA
-# ============================================================
-
 def estrai_lombardia(html_pagina, url_base):
     """
-    Estrae le schede Lombardia con stato Aperto o In apertura.
-    Esclude pesca, FEAMPA, acquacoltura, gare e altre voci non pertinenti.
+    Lombardia:
+    estrae card aperte/in apertura, relative ad agricoltura e sviluppo rurale.
+    Esclude FEAMPA, pesca, acquacoltura, gare e temi non pertinenti.
     """
     soup = BeautifulSoup(html_pagina, "lxml")
     risultati = []
 
-    esclusioni_lombardia = (
+    esclusioni = (
         "feampa",
         "pesca",
         "acquacoltura",
@@ -598,7 +563,7 @@ def estrai_lombardia(html_pagina, url_base):
         if not ("aperto" in testo_basso or "in apertura" in testo_basso):
             continue
 
-        if any(parola in testo_basso for parola in esclusioni_lombardia):
+        if any(parola in testo_basso for parola in esclusioni):
             continue
 
         if contiene_esclusioni(f"{titolo} {testo_card}"):
@@ -626,6 +591,7 @@ def estrai_lombardia(html_pagina, url_base):
             continue
 
         stato = "Aperto"
+
         if "in apertura" in testo_basso:
             stato = "In apertura"
 
@@ -636,22 +602,18 @@ def estrai_lombardia(html_pagina, url_base):
                 url,
                 testo_card,
                 stato=stato,
-                categoria="Agricoltura / PAC / Sviluppo rurale"
+                categoria="Agricoltura / PAC / Sviluppo rurale",
             )
         )
 
     return elimina_duplicati(risultati)
 
 
-# ============================================================
-# SICILIA
-# ============================================================
-
 def estrai_sicilia(html_pagina, url_base):
     """
-    Categoria ufficiale 'Bandi aperti' Sicilia.
-    Esclude griglie, riduzioni, rettifiche, proroghe, graduatorie,
-    FAQ e altri atti successivi al bando originale.
+    Sicilia:
+    usa la categoria ufficiale Bandi aperti.
+    Esclude griglie, rettifiche, proroghe, graduatorie, FAQ e atti successivi.
     """
     soup = BeautifulSoup(html_pagina, "lxml")
     risultati = []
@@ -710,16 +672,12 @@ def estrai_sicilia(html_pagina, url_base):
                 url,
                 titolo,
                 stato="Aperto",
-                categoria="CSR / Sviluppo rurale"
+                categoria="CSR / Sviluppo rurale",
             )
         )
 
     return elimina_duplicati(risultati)
 
-
-# ============================================================
-# FONTI ATTIVE
-# ============================================================
 
 FONTI_HTML = {
     "Basilicata": {
