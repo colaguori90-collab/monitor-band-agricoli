@@ -33,24 +33,43 @@ model = genai.GenerativeModel("gemini-2.5-flash")
 
 REGIONI = {
     "Abruzzo": "https://www.regione.abruzzo.it/bandi-e-avvisi/agricoltura",
-    "Basilicata": "https://www.regione.basilicata.it/page/bandi-agricoltura",
-    "Calabria": "https://www.regione.calabria.it/dipartimento-agricoltura-risorse-agroalimentari-e-forestazione/",
-    "Campania": "https://agricoltura.regione.campania.it/bandi-e-finanziamenti/",
+
+    "Basilicata": "https://agricoltura.regione.basilicata.it/bandi-regionali/",
+
+    "Calabria": "https://www.regione.calabria.it/website/",
+
+    "Campania": "https://agricoltura.regione.campania.it/bandi.html",
+
     "Emilia-Romagna": "https://agricoltura.regione.emilia-romagna.it/sviluppo-rurale-23-27/opportunita/bandi/bandi-aperti",
+
     "Friuli-Venezia Giulia": "https://www.opr.fvg.it/it/bandi-e-scadenze-per-la-presentazione-delle-domande-86876/bandi-aperti-72911",
+
     "Lazio": "https://www.regione.lazio.it/imprese/agricoltura",
+
     "Liguria": "https://www.siarliguria.it/web/Public/Bandi.aspx",
+
     "Lombardia": "https://www.bandi.regione.lombardia.it/servizi/servizio/bandi/agricoltura",
+
     "Marche": "https://siar.regione.marche.it/SiarWeb/Public/Bandi.aspx",
-    "Molise": "https://www.regione.molise.it/flex/cm/pages/ServBando.php",
+
+    "Molise": "https://www.regione.molise.it/",
+
     "Piemonte": "https://bandi.regione.piemonte.it/contributi-finanziamenti",
+
     "Puglia": "https://www.regione.puglia.it/web/agricoltura/bandi",
+
     "Sardegna": "https://www.sardegnaagricoltura.it/it/bandi/",
+
     "Sicilia": "https://www.psrsicilia.it/bandi-aperti/",
+
     "Toscana": "https://www.regione.toscana.it/sviluppo-rurale-2023-2027/bandi",
+
     "Trentino-Alto Adige": "https://www.provincia.bz.it/agricoltura/bandi.asp",
+
     "Umbria": "https://applicazioni.regione.umbria.it/widget/bandi1/-/bandi_WAR_bandiportlet",
+
     "Valle d'Aosta": "https://www.regione.vda.it/agricoltura/bandi_i.asp",
+
     "Veneto": "https://www.regione.veneto.it/web/agricoltura-e-foreste/bandi-finanziamenti",
 }
 
