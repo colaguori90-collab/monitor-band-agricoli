@@ -57,9 +57,11 @@ jobs:
           }
 
           fonti = {
-              "campania": "https://agricoltura.regione.campania.it/bandi.html",
-              "basilicata": "https://agricoltura.regione.basilicata.it/bandi-regionali/",
-          }
+    "campania": "https://agricoltura.regione.campania.it/bandi.html",
+    "basilicata": "https://agricoltura.regione.basilicata.it/bandi-regionali/",
+    "puglia": "https://csr.regione.puglia.it/bandi",
+    "marche": "https://www.regione.marche.it/Entra-in-Regione/Bandi-e-opportunita/Bandi-attivi?p=1&t=103",
+}
 
           for nome, url in fonti.items():
               try:
