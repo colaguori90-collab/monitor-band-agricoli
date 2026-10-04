@@ -646,7 +646,317 @@ def estrai_basilicata(html_pagina, url_base):
 
     print(f"      Basilicata: estratti {len(risultati)} bandi")
     return elimina_duplicati(risultati)
+# ============================================================
+# PUGLIA
+# ============================================================
 
+def estrai_puglia(html_pagina, url_base):
+    """
+    CSR Puglia:
+    prende solo card con stato 'Aperto' o 'Prossima apertura'.
+    Ogni card deve avere un titolo e un link individuale.
+    """
+    soup = BeautifulSoup(html_pagina, "lxml")
+    risultati = []
+
+    stati_validi = ("aperto", "prossima apertura", "in apertura")
+
+    # Cerca i titoli delle card: nella pagina sono H3.
+    for titolo_tag in soup.find_all(["h2", "h3", "h4"]):
+        titolo = pulisci_testo(titolo_tag.get_text(" ", strip=True))
+
+        if len(titolo) < 15:
+            continue
+
+        # Cerca un contenitore vicino che includa stato e contenuto card.
+        contenitore = titolo_tag.parent
+        card = None
+
+        for _ in range(6):
+            if not contenitore:
+                break
+
+            testo_card = pulisci_testo(contenitore.get_text(" ", strip=True))
+            testo_basso = testo_card.lower()
+
+            if any(stato in testo_basso for stato in stati_validi):
+                card = contenitore
+                break
+
+            contenitore = contenitore.parent
+
+        if not card:
+            continue
+
+        testo_card = pulisci_testo(card.get_text(" ", strip=True))
+        testo_basso = testo_card.lower()
+
+        if "chiuso" in testo_basso:
+            continue
+
+        if not any(stato in testo_basso for stato in stati_validi):
+            continue
+
+        if contiene_esclusioni(f"{titolo} {testo_card}"):
+            continue
+
+        if not riguarda_agricoltura(f"{titolo} {testo_card}"):
+            continue
+
+        # Cerca prima il link del titolo, poi un link della card.
+        link = titolo_tag.find("a", href=True)
+
+        if not link:
+            for candidato in card.find_all("a", href=True):
+                href = candidato.get("href", "").lower()
+                testo_link = pulisci_testo(
+                    candidato.get_text(" ", strip=True)
+                ).lower()
+
+                # Evita link di navigazione, preferisce il dettaglio bando.
+                if (
+                    len(testo_link) > 5
+                    and "bandi" not in href.rstrip("/").split("/")[-1]
+                    and "homepage" not in href
+                ):
+                    link = candidato
+                    break
+
+        if not link:
+            continue
+
+        url = urljoin(url_base, link["href"])
+
+        if url.rstrip("/") == url_base.rstrip("/"):
+            continue
+
+        stato = "Aperto"
+        if "prossima apertura" in testo_basso:
+            stato = "Prossima apertura"
+        elif "in apertura" in testo_basso:
+            stato = "In apertura"
+
+        risultati.append(
+            crea_record(
+                "Puglia",
+                titolo,
+                url,
+                testo_card,
+                stato=stato,
+                categoria="CSR 2023-2027"
+            )
+        )
+
+    return elimina_duplicati(risultati)
+
+
+# ============================================================
+# LOMBARDIA
+# ============================================================
+
+def estrai_lombardia(html_pagina, url_base):
+    """
+    Bandi e Servizi Lombardia:
+    estrae i blocchi con stato 'Aperto' oppure 'In apertura'.
+    Filtra espressamente pesca/FEAMPA/acquacoltura e voci estranee.
+    """
+    soup = BeautifulSoup(html_pagina, "lxml")
+    risultati = []
+
+    esclusioni_lombardia = (
+        "feampa",
+        "pesca",
+        "acquacoltura",
+        "studio legale",
+        "studi legali",
+        "denunce sinistri",
+        "rivalse",
+        "assicurazioni",
+        "concorso",
+        "gara",
+    )
+
+    # Ogni titolo di bando è visibile come H4.
+    for titolo_tag in soup.find_all(["h3", "h4"]):
+        titolo = pulisci_testo(titolo_tag.get_text(" ", strip=True))
+
+        if len(titolo) < 15:
+            continue
+
+        contenitore = titolo_tag.parent
+        card = None
+
+        for _ in range(6):
+            if not contenitore:
+                break
+
+            testo_card = pulisci_testo(contenitore.get_text(" ", strip=True))
+            testo_basso = testo_card.lower()
+
+            if "aperto" in testo_basso or "in apertura" in testo_basso:
+                card = contenitore
+                break
+
+            contenitore = contenitore.parent
+
+        if not card:
+            continue
+
+        testo_card = pulisci_testo(card.get_text(" ", strip=True))
+        testo_basso = testo_card.lower()
+
+        if not ("aperto" in testo_basso or "in apertura" in testo_basso):
+            continue
+
+        if any(parola in testo_basso for parola in esclusioni_lombardia):
+            continue
+
+        if contiene_esclusioni(f"{titolo} {testo_card}"):
+            continue
+
+        # Mantieni solo ciò che è almeno agricolo/rurale/forestale/zootecnico.
+        if not riguarda_agricoltura(f"{titolo} {testo_card}"):
+            continue
+
+        link = titolo_tag.find("a", href=True)
+
+        if not link:
+            for candidato in card.find_all("a", href=True):
+                href = candidato.get("href", "")
+
+                if "/dettaglio/" in href or "/bando/" in href:
+                    link = candidato
+                    break
+
+        if not link:
+            continue
+
+        url = urljoin(url_base, link["href"])
+
+        if url.rstrip("/") == url_base.rstrip("/"):
+            continue
+
+        stato = "Aperto"
+        if "in apertura" in testo_basso:
+            stato = "In apertura"
+
+        risultati.append(
+            crea_record(
+                "Lombardia",
+                titolo,
+                url,
+                testo_card,
+                stato=stato,
+                categoria="Agricoltura / PAC / Sviluppo rurale"
+            )
+        )
+
+    return elimina_duplicati(risultati)
+
+
+# ============================================================
+# MARCHE
+# ============================================================
+
+def estrai_marche(html_pagina, url_base):
+    """
+    Marche:
+    ogni bando è presentato con:
+    - titolo H4;
+    - identificativo bando e scadenza;
+    - link sulla scheda/titolo o nell'area vicina.
+    Include i GAL e gli interventi CSR.
+    Esclude bandi faunistico-venatori.
+    """
+    soup = BeautifulSoup(html_pagina, "lxml")
+    risultati = []
+
+    esclusioni_marche = (
+        "faunistico",
+        "venatorio",
+        "caccia",
+        "pesca",
+        "feampa",
+        "acquacoltura",
+        "gara",
+        "concorso",
+    )
+
+    for titolo_tag in soup.find_all(["h3", "h4"]):
+        titolo = pulisci_testo(titolo_tag.get_text(" ", strip=True))
+
+        if len(titolo) < 20:
+            continue
+
+        titolo_basso = titolo.lower()
+
+        if any(parola in titolo_basso for parola in esclusioni_marche):
+            continue
+
+        # Trova il contenitore che ha anche Identificativo e Scadenza.
+        contenitore = titolo_tag.parent
+        card = None
+
+        for _ in range(6):
+            if not contenitore:
+                break
+
+            testo_card = pulisci_testo(contenitore.get_text(" ", strip=True))
+
+            if "identificativo bando" in testo_card.lower():
+                card = contenitore
+                break
+
+            contenitore = contenitore.parent
+
+        if not card:
+            continue
+
+        testo_card = pulisci_testo(card.get_text(" ", strip=True))
+        testo_basso = testo_card.lower()
+
+        if any(parola in testo_basso for parola in esclusioni_marche):
+            continue
+
+        # Deve essere sviluppo rurale/agricoltura/CSR oppure GAL.
+        if not riguarda_agricoltura(f"{titolo} {testo_card}"):
+            continue
+
+        link = titolo_tag.find("a", href=True)
+
+        if not link:
+            for candidato in card.find_all("a", href=True):
+                href = candidato.get("href", "")
+
+                if (
+                    "Bandi" in href
+                    or "bando" in href.lower()
+                    or "id_" in href.lower()
+                    or "Dettaglio" in href
+                ):
+                    link = candidato
+                    break
+
+        if not link:
+            continue
+
+        url = urljoin(url_base, link["href"])
+
+        if url.rstrip("/") == url_base.rstrip("/"):
+            continue
+
+        risultati.append(
+            crea_record(
+                "Marche",
+                titolo,
+                url,
+                testo_card,
+                stato="Aperto",
+                categoria="CSR / Sviluppo rurale / GAL"
+            )
+        )
+
+    return elimina_duplicati(risultati)
 # ============================================================
 # FONTI ESTRATTORE
 # ============================================================
@@ -670,5 +980,16 @@ FONTI_HTML = {
         "url": "https://svilupporurale.regione.sicilia.it/categoria/news/bandi-aperti/",
         "estrattore": estrai_sicilia,
     },
-  
+      "Puglia": {
+        "url": "https://csr.regione.puglia.it/bandi",
+        "estrattore": estrai_puglia,
+    },
+    "Lombardia": {
+        "url": "https://www.bandi.regione.lombardia.it/servizi/servizio/bandi/agricoltura-pesca",
+        "estrattore": estrai_lombardia,
+    },
+    "Marche": {
+        "url": "https://www.regione.marche.it/Entra-in-Regione/Bandi-e-opportunita/Bandi-attivi?p=1&t=103",
+        "estrattore": estrai_marche,
+    },
       }
