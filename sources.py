@@ -1,4 +1,5 @@
 import re
+from datetime import datetime
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
@@ -164,86 +165,6 @@ def elimina_duplicati(bandi):
     return risultati
 
 
-def estrai_campania(html_pagina, url_base):
-    """
-    Campania:
-    tenta prima la sezione id='csr'.
-    Se non la trova, cerca qualsiasi tabella che contenga il codice SRD06
-    oppure una riga con bando + scadenza + link.
-    """
-    soup = BeautifulSoup(html_pagina, "lxml")
-    risultati = []
-
-    sezioni_da_controllare = []
-
-    sezione_csr = soup.find(id="csr")
-    if sezione_csr:
-        sezioni_da_controllare.append(sezione_csr)
-
-    # Fallback: alcuni siti cambiano struttura o omettono l'id.
-    for tabella in soup.find_all("table"):
-        testo_tabella = pulisci_testo(tabella.get_text(" ", strip=True)).lower()
-
-        if (
-            "complemento di sviluppo rurale" in testo_tabella
-            or "srd06" in testo_tabella
-            or "csr 2023" in testo_tabella
-        ):
-            sezioni_da_controllare.append(tabella)
-
-    visti_righe = set()
-
-    for sezione in sezioni_da_controllare:
-        for riga in sezione.find_all("tr"):
-            celle = riga.find_all("td")
-
-            if len(celle) < 3:
-                continue
-
-            titolo = pulisci_testo(celle[0].get_text(" ", strip=True))
-            scadenza = pulisci_testo(celle[1].get_text(" ", strip=True))
-            link = celle[-1].find("a", href=True)
-
-            if not titolo or "nessun bando aperto" in titolo.lower():
-                continue
-
-            if not link:
-                continue
-
-            # Deve essere una misura specifica CSR/PSR/GAL.
-            titolo_basso = titolo.lower()
-            if not (
-                re.search(r"\bSR[A-Z]?\d{2}\b", titolo, flags=re.IGNORECASE)
-                or "bando" in titolo_basso
-                or "avviso" in titolo_basso
-                or "gal" in titolo_basso
-            ):
-                continue
-
-            url = urljoin(url_base, link["href"])
-
-            chiave = (titolo.lower(), url.lower())
-            if chiave in visti_righe:
-                continue
-
-            visti_righe.add(chiave)
-
-            record = crea_record(
-                "Campania",
-                titolo,
-                url,
-                scadenza,
-                stato="Aperto",
-                categoria="CSR 2023-2027"
-            )
-
-            record["scadenza"] = scadenza or "non specificata"
-            risultati.append(record)
-
-    print(f"      Campania: estratti {len(risultati)} bandi")
-    return elimina_duplicati(risultati)
-
-
 def estrai_basilicata(html_pagina, url_base):
     """
     Basilicata:
@@ -349,10 +270,317 @@ def estrai_basilicata(html_pagina, url_base):
     return elimina_duplicati(risultati)
 
 
+def estrai_campania(html_pagina, url_base):
+    """
+    Campania:
+    legge la sezione CSR e, in fallback, le tabelle CSR/SRD06.
+    """
+    soup = BeautifulSoup(html_pagina, "lxml")
+    risultati = []
+
+    sezioni_da_controllare = []
+
+    sezione_csr = soup.find(id="csr")
+
+    if sezione_csr:
+        sezioni_da_controllare.append(sezione_csr)
+
+    for tabella in soup.find_all("table"):
+        testo_tabella = pulisci_testo(tabella.get_text(" ", strip=True)).lower()
+
+        if (
+            "complemento di sviluppo rurale" in testo_tabella
+            or "srd06" in testo_tabella
+            or "csr 2023" in testo_tabella
+        ):
+            sezioni_da_controllare.append(tabella)
+
+    visti_righe = set()
+
+    for sezione in sezioni_da_controllare:
+        for riga in sezione.find_all("tr"):
+            celle = riga.find_all("td")
+
+            if len(celle) < 3:
+                continue
+
+            titolo = pulisci_testo(celle[0].get_text(" ", strip=True))
+            scadenza = pulisci_testo(celle[1].get_text(" ", strip=True))
+            link = celle[-1].find("a", href=True)
+
+            if not titolo or "nessun bando aperto" in titolo.lower():
+                continue
+
+            if not link:
+                continue
+
+            titolo_basso = titolo.lower()
+
+            if not (
+                re.search(r"\bSR[A-Z]?\d{2}\b", titolo, flags=re.IGNORECASE)
+                or "bando" in titolo_basso
+                or "avviso" in titolo_basso
+                or "gal" in titolo_basso
+            ):
+                continue
+
+            url = urljoin(url_base, link["href"])
+            chiave = (titolo.lower(), url.lower())
+
+            if chiave in visti_righe:
+                continue
+
+            visti_righe.add(chiave)
+
+            record = crea_record(
+                "Campania",
+                titolo,
+                url,
+                scadenza,
+                stato="Aperto",
+                categoria="CSR 2023-2027",
+            )
+
+            record["scadenza"] = scadenza or "non specificata"
+            risultati.append(record)
+
+    print(f"      Campania: estratti {len(risultati)} bandi")
+    return elimina_duplicati(risultati)
+
+
+def estrai_emilia_romagna(html_pagina, url_base):
+    """
+    Emilia-Romagna:
+    cerca blocchi con 'Stato:' e 'Aperto', poi recupera il link pertinente.
+    """
+    soup = BeautifulSoup(html_pagina, "lxml")
+    risultati = []
+    visti = set()
+
+    candidati = []
+
+    for elemento in soup.find_all(["article", "section", "div", "li", "tr"]):
+        testo = pulisci_testo(elemento.get_text(" ", strip=True))
+        testo_basso = testo.lower()
+
+        if "stato:" not in testo_basso:
+            continue
+
+        if "aperto" not in testo_basso:
+            continue
+
+        if len(testo) < 60:
+            continue
+
+        candidati.append((elemento, testo))
+
+    print(f"      Emilia-Romagna: blocchi candidati: {len(candidati)}")
+
+    for elemento, testo in candidati:
+        if contiene_esclusioni(testo):
+            continue
+
+        if not riguarda_agricoltura(testo):
+            continue
+
+        link = elemento.find("a", href=True)
+
+        if not link:
+            genitore = elemento.parent
+
+            for _ in range(4):
+                if not genitore:
+                    break
+
+                link = genitore.find("a", href=True)
+
+                if link:
+                    break
+
+                genitore = genitore.parent
+
+        if not link:
+            continue
+
+        url = urljoin(url_base, link["href"])
+
+        if url.rstrip("/") == url_base.rstrip("/"):
+            continue
+
+        titolo_tag = elemento.find(
+            ["h1", "h2", "h3", "h4", "h5", "strong", "b"]
+        )
+
+        titolo = (
+            pulisci_testo(titolo_tag.get_text(" ", strip=True))
+            if titolo_tag
+            else testo
+        )
+
+        titolo = re.sub(
+            r"Pubblicato il:.*",
+            "",
+            titolo,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        titolo = re.sub(
+            r"Stato:.*",
+            "",
+            titolo,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        titolo = re.sub(
+            r"Scadenza:.*",
+            "",
+            titolo,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        titolo = pulisci_testo(titolo)
+
+        if len(titolo) < 20:
+            titolo = pulisci_testo(testo)
+
+        if len(titolo) < 20:
+            continue
+
+        match_scadenza = re.search(
+            r"Scadenza:\s*([0-9]{1,2}-[0-9]{1,2}-[0-9]{4})",
+            testo,
+            flags=re.IGNORECASE,
+        )
+
+        scadenza = (
+            pulisci_testo(match_scadenza.group(1))
+            if match_scadenza
+            else "non specificata"
+        )
+
+        chiave = (titolo.lower(), url.lower())
+
+        if chiave in visti:
+            continue
+
+        visti.add(chiave)
+
+        record = crea_record(
+            "Emilia-Romagna",
+            titolo,
+            url,
+            testo,
+            stato="Aperto",
+            categoria="CSR 2023-2027 / Sviluppo rurale",
+        )
+
+        record["scadenza"] = scadenza
+        risultati.append(record)
+
+    print(f"      Emilia-Romagna: estratti {len(risultati)} bandi")
+    return elimina_duplicati(risultati)
+
+
+def estrai_lombardia(html_pagina, url_base):
+    """
+    Lombardia:
+    estrae card aperte/in apertura relative ad agricoltura e sviluppo rurale.
+    """
+    soup = BeautifulSoup(html_pagina, "lxml")
+    risultati = []
+
+    esclusioni = (
+        "feampa",
+        "pesca",
+        "acquacoltura",
+        "studio legale",
+        "studi legali",
+        "denunce sinistri",
+        "rivalse",
+        "assicurazioni",
+        "concorso",
+        "gara",
+    )
+
+    for titolo_tag in soup.find_all(["h3", "h4"]):
+        titolo = pulisci_testo(titolo_tag.get_text(" ", strip=True))
+
+        if len(titolo) < 15:
+            continue
+
+        contenitore = titolo_tag.parent
+        card = None
+
+        for _ in range(6):
+            if not contenitore:
+                break
+
+            testo_card = pulisci_testo(
+                contenitore.get_text(" ", strip=True)
+            ).lower()
+
+            if "aperto" in testo_card or "in apertura" in testo_card:
+                card = contenitore
+                break
+
+            contenitore = contenitore.parent
+
+        if not card:
+            continue
+
+        testo_card = pulisci_testo(card.get_text(" ", strip=True))
+        testo_basso = testo_card.lower()
+
+        if not ("aperto" in testo_basso or "in apertura" in testo_basso):
+            continue
+
+        if any(parola in testo_basso for parola in esclusioni):
+            continue
+
+        if contiene_esclusioni(f"{titolo} {testo_card}"):
+            continue
+
+        if not riguarda_agricoltura(f"{titolo} {testo_card}"):
+            continue
+
+        link = titolo_tag.find("a", href=True)
+
+        if not link:
+            for candidato in card.find_all("a", href=True):
+                href = candidato.get("href", "")
+
+                if "/dettaglio/" in href or "/bando/" in href:
+                    link = candidato
+                    break
+
+        if not link:
+            continue
+
+        url = urljoin(url_base, link["href"])
+
+        if url.rstrip("/") == url_base.rstrip("/"):
+            continue
+
+        stato = "Aperto"
+
+        if "in apertura" in testo_basso:
+            stato = "In apertura"
+
+        risultati.append(
+            crea_record(
+                "Lombardia",
+                titolo,
+                url,
+                testo_card,
+                stato=stato,
+                categoria="Agricoltura / PAC / Sviluppo rurale",
+            )
+        )
+
+    return elimina_duplicati(risultati)
+
+
 def estrai_piemonte(html_pagina, url_base):
     """
     Piemonte:
-    estrae solo schede singole dal dominio bandi.regione.piemonte.it.
+    estrae solo schede singole dal portale bandi regionale.
     """
     soup = BeautifulSoup(html_pagina, "lxml")
     risultati = []
@@ -431,9 +659,7 @@ def estrai_piemonte(html_pagina, url_base):
 def estrai_puglia(html_pagina, url_base):
     """
     Puglia:
-    ogni bando è una card <a class="as-card">.
-    La funzione estrae lo stato, il codice SR*, il titolo e il link diretto.
-    Rimuove i codici colore tecnici dei div nascosti.
+    legge le card dei bandi CSR e rimuove i codici tecnici dei div nascosti.
     """
     soup = BeautifulSoup(html_pagina, "lxml")
     risultati = []
@@ -531,78 +757,75 @@ def estrai_puglia(html_pagina, url_base):
     return elimina_duplicati(risultati)
 
 
-def estrai_lombardia(html_pagina, url_base):
+def estrai_sardegna(html_pagina, url_base):
     """
-    Lombardia:
-    estrae card aperte/in apertura, relative ad agricoltura e sviluppo rurale.
-    Esclude FEAMPA, pesca, acquacoltura, gare e temi non pertinenti.
+    Sardegna:
+    estrae solo bandi aperti con scadenza futura.
+    Pulisce i titoli e gestisce le proroghe.
     """
     soup = BeautifulSoup(html_pagina, "lxml")
     risultati = []
+    visti = set()
 
-    esclusioni = (
-        "feampa",
-        "pesca",
-        "acquacoltura",
-        "studio legale",
-        "studi legali",
-        "denunce sinistri",
-        "rivalse",
-        "assicurazioni",
-        "concorso",
-        "gara",
-    )
+    mesi = {
+        "gennaio": 1, "febbraio": 2, "marzo": 3, "aprile": 4,
+        "maggio": 5, "giugno": 6, "luglio": 7, "agosto": 8,
+        "settembre": 9, "ottobre": 10, "novembre": 11, "dicembre": 12,
+    }
 
-    for titolo_tag in soup.find_all(["h3", "h4"]):
-        titolo = pulisci_testo(titolo_tag.get_text(" ", strip=True))
+    def parse_data_it(testo_data):
+        testo_data = pulisci_testo(testo_data).lower()
 
-        if len(titolo) < 15:
+        match_num = re.search(r"(\d{1,2})/(\d{1,2})/(\d{4})", testo_data)
+
+        if match_num:
+            return datetime(
+                int(match_num.group(3)),
+                int(match_num.group(2)),
+                int(match_num.group(1)),
+            )
+
+        match_testo = re.search(
+            r"(\d{1,2})\s+([a-zàèéìòù]+)\s+(\d{4})",
+            testo_data,
+        )
+
+        if match_testo:
+            giorno = int(match_testo.group(1))
+            mese = mesi.get(match_testo.group(2))
+            anno = int(match_testo.group(3))
+
+            if mese:
+                return datetime(anno, mese, giorno)
+
+        return None
+
+    for card in soup.find_all(["article", "div", "li"]):
+        testo = pulisci_testo(card.get_text(" ", strip=True))
+        testo_basso = testo.lower()
+
+        if len(testo) < 60:
             continue
 
-        contenitore = titolo_tag.parent
-        card = None
-
-        for _ in range(6):
-            if not contenitore:
-                break
-
-            testo_card = pulisci_testo(
-                contenitore.get_text(" ", strip=True)
-            ).lower()
-
-            if "aperto" in testo_card or "in apertura" in testo_card:
-                card = contenitore
-                break
-
-            contenitore = contenitore.parent
-
-        if not card:
+        if "aperto" not in testo_basso:
             continue
 
-        testo_card = pulisci_testo(card.get_text(" ", strip=True))
-        testo_basso = testo_card.lower()
-
-        if not ("aperto" in testo_basso or "in apertura" in testo_basso):
+        if contiene_esclusioni(testo):
             continue
 
-        if any(parola in testo_basso for parola in esclusioni):
+        if not riguarda_agricoltura(testo):
             continue
 
-        if contiene_esclusioni(f"{titolo} {testo_card}"):
+        match_misura = re.search(
+            r"\b(?:Intervento\s+)?SR[A-Z]?\s?\d{2}\b",
+            testo,
+            flags=re.IGNORECASE,
+        )
+
+        if not match_misura:
             continue
 
-        if not riguarda_agricoltura(f"{titolo} {testo_card}"):
-            continue
-
-        link = titolo_tag.find("a", href=True)
-
-        if not link:
-            for candidato in card.find_all("a", href=True):
-                href = candidato.get("href", "")
-
-                if "/dettaglio/" in href or "/bando/" in href:
-                    link = candidato
-                    break
+        link = card.find("a", href=True)
 
         if not link:
             continue
@@ -612,30 +835,90 @@ def estrai_lombardia(html_pagina, url_base):
         if url.rstrip("/") == url_base.rstrip("/"):
             continue
 
-        stato = "Aperto"
+        titolo = pulisci_testo(testo)
 
-        if "in apertura" in testo_basso:
-            stato = "In apertura"
-
-        risultati.append(
-            crea_record(
-                "Lombardia",
-                titolo,
-                url,
-                testo_card,
-                stato=stato,
-                categoria="Agricoltura / PAC / Sviluppo rurale",
-            )
+        titolo = re.sub(
+            r"^(CSR\s+(regionali\s+)?aperto\s+)",
+            "",
+            titolo,
+            flags=re.IGNORECASE,
         )
 
+        taglio = re.search(
+            r"(Data pubblicazione:|Pubblicato il:|Apertura:|Scadenza:|Proroga scadenza:)",
+            titolo,
+            flags=re.IGNORECASE,
+        )
+
+        if taglio:
+            titolo = titolo[: taglio.start()]
+
+        titolo = pulisci_testo(titolo)
+
+        if len(titolo) < 25:
+            continue
+
+        match_proroga = re.search(
+            r"Proroga scadenza:\s*([0-9]{1,2}\s+[a-zàèéìòù]+\s+[0-9]{4}"
+            r"|[0-9]{1,2}/[0-9]{1,2}/[0-9]{4})",
+            testo,
+            flags=re.IGNORECASE,
+        )
+
+        match_scadenza = re.search(
+            r"Scadenza:\s*([0-9]{1,2}\s+[a-zàèéìòù]+\s+[0-9]{4}"
+            r"|[0-9]{1,2}/[0-9]{1,2}/[0-9]{4})",
+            testo,
+            flags=re.IGNORECASE,
+        )
+
+        testo_data = None
+
+        if match_proroga:
+            testo_data = match_proroga.group(1)
+        elif match_scadenza:
+            testo_data = match_scadenza.group(1)
+
+        if not testo_data:
+            continue
+
+        data_scadenza = parse_data_it(testo_data)
+
+        if not data_scadenza or data_scadenza < datetime.now():
+            continue
+
+        stato = "Aperto"
+
+        if match_proroga:
+            stato = "Aperto – proroga scadenza"
+
+        chiave = (titolo.lower(), url.lower())
+
+        if chiave in visti:
+            continue
+
+        visti.add(chiave)
+
+        record = crea_record(
+            "Sardegna",
+            titolo,
+            url,
+            testo,
+            stato=stato,
+            categoria="PSR / CSR / Sviluppo rurale",
+        )
+
+        record["scadenza"] = pulisci_testo(testo_data)
+        risultati.append(record)
+
+    print(f"      Sardegna: estratti {len(risultati)} bandi")
     return elimina_duplicati(risultati)
 
 
 def estrai_sicilia(html_pagina, url_base):
     """
     Sicilia:
-    usa la categoria ufficiale Bandi aperti.
-    Esclude griglie, rettifiche, proroghe, graduatorie, FAQ e atti successivi.
+    usa la categoria ufficiale Bandi aperti ed esclude atti successivi.
     """
     soup = BeautifulSoup(html_pagina, "lxml")
     risultati = []
@@ -699,356 +982,65 @@ def estrai_sicilia(html_pagina, url_base):
         )
 
     return elimina_duplicati(risultati)
-def estrai_marche(html_pagina, url_base):
-    """
-    Marche: versione diagnostica temporanea.
-    Stampa cosa vede lo script nella pagina per capire perché non estrae bandi.
-    """
-    soup = BeautifulSoup(html_pagina, "lxml")
-    risultati = []
-
-    testo_pagina = pulisci_testo(soup.get_text(" ", strip=True))
-    testo_pagina_basso = testo_pagina.lower()
-
-    print("      Marche: lunghezza HTML:", len(html_pagina))
-    print("      Marche: lunghezza testo:", len(testo_pagina))
-    print("      Marche: numero link:", len(soup.find_all("a")))
-    print("      Marche: contiene 'Scadenza':", "scadenza" in testo_pagina_basso)
-    print("      Marche: contiene 'CSR':", "csr" in testo_pagina_basso)
-    print("      Marche: contiene 'SRD':", "srd" in testo_pagina_basso)
-    print("      Marche: contiene 'GAL':", "gal" in testo_pagina_basso)
-
-    # Stampa i primi 600 caratteri del testo visibile.
-    print("      Marche: inizio testo pagina:")
-    print("      " + testo_pagina[:600].replace("\n", " "))
-
-    # Cerca tutte le occorrenze di 'Scadenza' e stampa il contesto.
-    posizioni = [
-        match.start()
-        for match in re.finditer(r"scadenza", testo_pagina_basso)
-    ]
-
-    print("      Marche: occorrenze 'Scadenza':", len(posizioni))
-
-    for indice, posizione in enumerate(posizioni[:5], start=1):
-        contesto = testo_pagina[
-            max(0, posizione - 150): posizione + 250
-        ]
-
-        print(f"      Marche: contesto scadenza {indice}:")
-        print("      " + pulisci_testo(contesto))
-
-    # Stampa i primi 20 link non di navigazione.
-    print("      Marche: primi link trovati:")
-
-    for indice, link in enumerate(soup.find_all("a", href=True)[:20], start=1):
-        testo_link = pulisci_testo(link.get_text(" ", strip=True))
-        href = link.get("href", "")
-
-        print(
-            f"      {indice}. testo='{testo_link[:100]}' | href='{href[:180]}'"
-        )
-
-    return risultati
-
-
-def estrai_valle_daosta(html_pagina, url_base):
-    """
-    Valle d'Aosta:
-    estrae solo interventi CSR con 'SPORTELLO APERTO'
-    oppure scadenza nel futuro.
-    """
-    soup = BeautifulSoup(html_pagina, "lxml")
-    risultati = []
-
-    for elemento in soup.find_all(["li", "p", "div"]):
-        testo = pulisci_testo(elemento.get_text(" ", strip=True))
-        testo_basso = testo.lower()
-
-        if len(testo) < 30:
-            continue
-
-        aperto = "sportello aperto" in testo_basso
-        scadenza_futura = False
-        scadenza = "non specificata"
-
-        match = re.search(
-            r"scadenza\s+([0-9]{1,2}\s+[a-zàèéìòù]+\s+[0-9]{4})",
-            testo_basso,
-        )
-
-        if not match:
-            match = re.search(
-                r"scadenza\s+([0-9]{1,2}\s+[a-zàèéìòù]+\s+[0-9]{4})",
-                testo,
-                flags=re.IGNORECASE,
-            )
-
-        if match:
-            scadenza = pulisci_testo(match.group(1)).title()
-
-            try:
-                data_scadenza = datetime.strptime(
-                    scadenza,
-                    "%d %B %Y"
-                )
-                scadenza_futura = data_scadenza >= datetime.now()
-            except Exception:
-                scadenza_futura = False
-
-        if not aperto and not scadenza_futura:
-            continue
-
-        if contiene_esclusioni(testo):
-            continue
-
-        if not riguarda_agricoltura(testo):
-            continue
-
-        link = elemento.find("a", href=True)
-        url = url_base
-
-        if link:
-            url = urljoin(url_base, link["href"])
-
-        stato = "Sportello aperto" if aperto else "Aperto"
-
-        risultati.append(
-            crea_record(
-                "Valle d'Aosta",
-                testo,
-                url,
-                testo,
-                stato=stato,
-                categoria="CSR 2023-2027 / Agricoltura",
-            )
-        )
-
-    print(f"      Valle d'Aosta: estratti {len(risultati)} bandi")
-    return elimina_duplicati(risultati)
-def estrai_emilia_romagna(html_pagina, url_base):
-    """
-    Emilia-Romagna:
-    pagina 'Bandi aperti' con titolo, stato, scadenza e link alla scheda.
-    """
-    soup = BeautifulSoup(html_pagina, "lxml")
-    risultati = []
-    visti = set()
-
-    for link in soup.find_all("a", href=True):
-        url = urljoin(url_base, link.get("href", ""))
-
-        if url.rstrip("/") == url_base.rstrip("/"):
-            continue
-
-        contenitore = link.parent
-        blocco = None
-
-        for _ in range(8):
-            if not contenitore:
-                break
-
-            testo = pulisci_testo(contenitore.get_text(" ", strip=True))
-
-            if "Stato:" in testo and "Pubblicato il:" in testo:
-                blocco = contenitore
-                break
-
-            contenitore = contenitore.parent
-
-        if not blocco:
-            continue
-
-        testo = pulisci_testo(blocco.get_text(" ", strip=True))
-        testo_basso = testo.lower()
-
-        if "stato:" not in testo_basso:
-            continue
-
-        if "aperto" not in testo_basso:
-            continue
-
-        if contiene_esclusioni(testo):
-            continue
-
-        if not riguarda_agricoltura(testo):
-            continue
-
-        match_scadenza = re.search(
-            r"Scadenza:\s*([0-9]{1,2}-[0-9]{1,2}-[0-9]{4})",
-            testo,
-            flags=re.IGNORECASE,
-        )
-
-        scadenza = (
-            pulisci_testo(match_scadenza.group(1))
-            if match_scadenza
-            else "non specificata"
-        )
-
-        titolo_tag = blocco.find(["h1", "h2", "h3", "h4", "strong", "b"])
-        titolo = (
-            pulisci_testo(titolo_tag.get_text(" ", strip=True))
-            if titolo_tag
-            else testo
-        )
-
-        titolo = re.sub(
-            r"Pubblicato il:.*",
-            "",
-            titolo,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
-        titolo = re.sub(
-            r"Scadenza:.*",
-            "",
-            titolo,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
-        titolo = pulisci_testo(titolo)
-
-        if len(titolo) < 20:
-            titolo = testo
-
-        chiave = (titolo.lower(), url.lower())
-
-        if chiave in visti:
-            continue
-
-        visti.add(chiave)
-
-        risultati.append(
-            crea_record(
-                "Emilia-Romagna",
-                titolo,
-                url,
-                testo,
-                stato="Aperto",
-                categoria="CSR 2023-2027 / Sviluppo rurale",
-            )
-        )
-
-    print(f"      Emilia-Romagna: estratti {len(risultati)} bandi")
-    return elimina_duplicati(risultati)
-
-
-def estrai_sardegna(html_pagina, url_base):
-    """
-    Sardegna:
-    portale PSR con card dei bandi, stato e date.
-    Gestisce anche la dicitura 'Proroga scadenza'.
-    """
-    soup = BeautifulSoup(html_pagina, "lxml")
-    risultati = []
-    visti = set()
-
-    for card in soup.find_all(["article", "div", "li"]):
-        testo = pulisci_testo(card.get_text(" ", strip=True))
-        testo_basso = testo.lower()
-
-        if len(testo) < 60:
-            continue
-
-        if "aperto" not in testo_basso:
-            continue
-
-        if contiene_esclusioni(testo):
-            continue
-
-        if not riguarda_agricoltura(testo):
-            continue
-
-        match_misura = re.search(
-            r"\b(?:Intervento\s+)?SR[A-Z]?\s?\d{2}\b",
-            testo,
-            flags=re.IGNORECASE,
-        )
-
-        if not match_misura:
-            continue
-
-        link = card.find("a", href=True)
-
-        if not link:
-            continue
-
-        url = urljoin(url_base, link["href"])
-
-        if url.rstrip("/") == url_base.rstrip("/"):
-            continue
-
-        titolo = pulisci_testo(testo)
-
-        # Taglia il testo dopo la prima data/proroga, se presente.
-        taglio = re.search(
-            r"(Pubblicato il:|Apertura:|Scadenza:|Proroga scadenza:)",
-            titolo,
-            flags=re.IGNORECASE,
-        )
-
-        if taglio:
-            titolo = titolo[: taglio.start()]
-
-        titolo = pulisci_testo(titolo)
-
-        if len(titolo) < 25:
-            continue
-
-        scadenza = "non specificata"
-
-        match_scadenza = re.search(
-            r"(?:Scadenza:|Proroga scadenza:)\s*"
-            r"([0-9]{1,2}\s+[a-zàèéìòù]+\s+[0-9]{4}"
-            r"|[0-9]{1,2}/[0-9]{1,2}/[0-9]{4})",
-            testo,
-            flags=re.IGNORECASE,
-        )
-
-        if match_scadenza:
-            scadenza = pulisci_testo(match_scadenza.group(1))
-
-        stato = "Aperto"
-
-        if "proroga scadenza" in testo_basso:
-            stato = "Aperto – proroga scadenza"
-
-        chiave = (titolo.lower(), url.lower())
-
-        if chiave in visti:
-            continue
-
-        visti.add(chiave)
-
-        risultati.append(
-            crea_record(
-                "Sardegna",
-                titolo,
-                url,
-                testo,
-                stato=stato,
-                categoria="PSR / CSR / Sviluppo rurale",
-            )
-        )
-
-        risultati[-1]["scadenza"] = scadenza
-
-    print(f"      Sardegna: estratti {len(risultati)} bandi")
-    return elimina_duplicati(risultati)
 
 
 def estrai_toscana(html_pagina, url_base):
     """
     Toscana:
-    pagina 'Bandi aperti' con schede CSR.
+    estrae solo schede di bando aperte, escludendo la pagina filtro
+    e le scadenze passate.
     """
     soup = BeautifulSoup(html_pagina, "lxml")
     risultati = []
     visti = set()
 
+    mesi = {
+        "gennaio": 1, "febbraio": 2, "marzo": 3, "aprile": 4,
+        "maggio": 5, "giugno": 6, "luglio": 7, "agosto": 8,
+        "settembre": 9, "ottobre": 10, "novembre": 11, "dicembre": 12,
+    }
+
+    def parse_data_it(testo_data):
+        testo_data = pulisci_testo(testo_data).lower()
+
+        match_num = re.search(r"(\d{1,2})/(\d{1,2})/(\d{4})", testo_data)
+
+        if match_num:
+            return datetime(
+                int(match_num.group(3)),
+                int(match_num.group(2)),
+                int(match_num.group(1)),
+            )
+
+        match_testo = re.search(
+            r"(\d{1,2})\s+([a-zàèéìòù]+)\s+(\d{4})",
+            testo_data,
+        )
+
+        if match_testo:
+            giorno = int(match_testo.group(1))
+            mese = mesi.get(match_testo.group(2))
+            anno = int(match_testo.group(3))
+
+            if mese:
+                return datetime(anno, mese, giorno)
+
+        return None
+
+    titoli_esclusi = (
+        "risultati dei bandi aperti",
+        "risultati dei bandi",
+        "bandi aperti",
+    )
+
     for titolo_tag in soup.find_all(["h2", "h3", "h4"]):
         titolo = pulisci_testo(titolo_tag.get_text(" ", strip=True))
+        titolo_basso = titolo.lower()
 
         if len(titolo) < 20:
+            continue
+
+        if any(titolo_basso.startswith(t) for t in titoli_esclusi):
             continue
 
         contenitore = titolo_tag.parent
@@ -1093,35 +1085,136 @@ def estrai_toscana(html_pagina, url_base):
         if url.rstrip("/") == url_base.rstrip("/"):
             continue
 
+        if url.lower() in visti:
+            continue
+
+        scadenza = cerca_scadenza(testo)
+        data_scadenza = parse_data_it(scadenza)
+
+        if data_scadenza and data_scadenza < datetime.now():
+            continue
+
         stato = "Aperto"
 
         if "sportello" in testo_basso:
             stato = "Sportello aperto"
 
-        scadenza = cerca_scadenza(testo)
+        visti.add(url.lower())
 
-        chiave = (titolo.lower(), url.lower())
-
-        if chiave in visti:
-            continue
-
-        visti.add(chiave)
-
-        risultati.append(
-            crea_record(
-                "Toscana",
-                titolo,
-                url,
-                testo,
-                stato=stato,
-                categoria="CSR 2023-2027 / Sviluppo rurale",
-            )
+        record = crea_record(
+            "Toscana",
+            titolo,
+            url,
+            testo,
+            stato=stato,
+            categoria="CSR 2023-2027 / Sviluppo rurale",
         )
 
-        risultati[-1]["scadenza"] = scadenza
+        record["scadenza"] = scadenza
+        risultati.append(record)
 
     print(f"      Toscana: estratti {len(risultati)} bandi")
     return elimina_duplicati(risultati)
+
+
+def estrai_valle_daosta(html_pagina, url_base):
+    """
+    Valle d'Aosta:
+    estrae solo interventi CSR con sportello aperto o scadenza futura.
+    """
+    soup = BeautifulSoup(html_pagina, "lxml")
+    risultati = []
+
+    for elemento in soup.find_all(["li", "p", "div"]):
+        testo = pulisci_testo(elemento.get_text(" ", strip=True))
+        testo_basso = testo.lower()
+
+        if len(testo) < 30:
+            continue
+
+        aperto = "sportello aperto" in testo_basso
+        scadenza_futura = False
+        scadenza = "non specificata"
+
+        match = re.search(
+            r"scadenza\s+([0-9]{1,2}\s+[a-zàèéìòù]+\s+[0-9]{4})",
+            testo,
+            flags=re.IGNORECASE,
+        )
+
+        if match:
+            scadenza = pulisci_testo(match.group(1)).title()
+
+            mesi = {
+                "gennaio": 1, "febbraio": 2, "marzo": 3, "aprile": 4,
+                "maggio": 5, "giugno": 6, "luglio": 7, "agosto": 8,
+                "settembre": 9, "ottobre": 10, "novembre": 11, "dicembre": 12,
+            }
+
+            match_data = re.search(
+                r"(\d{1,2})\s+([a-zàèéìòù]+)\s+(\d{4})",
+                scadenza.lower(),
+            )
+
+            if match_data:
+                giorno = int(match_data.group(1))
+                mese = mesi.get(match_data.group(2))
+                anno = int(match_data.group(3))
+
+                if mese:
+                    data_scadenza = datetime(anno, mese, giorno)
+                    scadenza_futura = data_scadenza >= datetime.now()
+
+        if not aperto and not scadenza_futura:
+            continue
+
+        if contiene_esclusioni(testo):
+            continue
+
+        if not riguarda_agricoltura(testo):
+            continue
+
+        link = elemento.find("a", href=True)
+        url = url_base
+
+        if link:
+            url = urljoin(url_base, link["href"])
+
+        stato = "Sportello aperto" if aperto else "Aperto"
+
+        risultati.append(
+            crea_record(
+                "Valle d'Aosta",
+                testo,
+                url,
+                testo,
+                stato=stato,
+                categoria="CSR 2023-2027 / Agricoltura",
+            )
+        )
+
+    print(f"      Valle d'Aosta: estratti {len(risultati)} bandi")
+    return elimina_duplicati(risultati)
+
+
+def estrai_marche(html_pagina, url_base):
+    """
+    Marche:
+    fonte attualmente disabilitata perché il sito regionale
+    blocca le richieste automatiche con CAPTCHA Radware.
+    """
+    soup = BeautifulSoup(html_pagina, "lxml")
+    risultati = []
+
+    testo_pagina = pulisci_testo(soup.get_text(" ", strip=True)).lower()
+
+    if "radware captcha page" in testo_pagina:
+        print("      Marche: accesso bloccato da CAPTCHA Radware")
+        return risultati
+
+    return risultati
+
+
 FONTI_HTML = {
     "Basilicata": {
         "url": "https://agricoltura.regione.basilicata.it/bandi-regionali/",
@@ -1163,5 +1256,4 @@ FONTI_HTML = {
         "url": "https://www.regione.vda.it/agricoltura/CSR_2023_2027/bandi_interventi_strutturali/default_i.aspx",
         "estrattore": estrai_valle_daosta,
     },
-}
-
+        }
