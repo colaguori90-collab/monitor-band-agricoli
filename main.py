@@ -90,7 +90,7 @@ def analizza_bando_con_gemini(bando, testo_dettaglio):
         "aliquota": "non specificata",
     }
 
-        if not testo_dettaglio or len(testo_dettaglio) < 250:
+            if not testo_dettaglio or len(testo_dettaglio) < 250:
         print(
             f"      Dettaglio troppo breve per Gemini: "
             f"{len(testo_dettaglio or '')} caratteri"
