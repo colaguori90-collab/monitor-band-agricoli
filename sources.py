@@ -1213,7 +1213,146 @@ def estrai_marche(html_pagina, url_base):
         return risultati
 
     return risultati
+def estrai_generico(html_pagina, url_base):
+    """
+    Estrattore generico per regioni con strutture diverse.
+    Accetta solo voci con misura CSR/PSR, link diretto e scadenza futura.
+    """
+    soup = BeautifulSoup(html_pagina, "lxml")
+    risultati = []
+    visti = set()
 
+    mesi = {
+        "gennaio": 1, "febbraio": 2, "marzo": 3, "aprile": 4,
+        "maggio": 5, "giugno": 6, "luglio": 7, "agosto": 8,
+        "settembre": 9, "ottobre": 10, "novembre": 11, "dicembre": 12,
+    }
+
+    def parse_data(testo_data):
+        testo_data = pulisci_testo(testo_data).lower()
+
+        match_num = re.search(r"(\d{1,2})[/-](\d{1,2})[/-](\d{4})", testo_data)
+
+        if match_num:
+            return datetime(
+                int(match_num.group(3)),
+                int(match_num.group(2)),
+                int(match_num.group(1)),
+            )
+
+        match_testo = re.search(
+            r"(\d{1,2})\s+([a-zàèéìòù]+)\s+(\d{4})",
+            testo_data,
+        )
+
+        if match_testo:
+            giorno = int(match_testo.group(1))
+            mese = mesi.get(match_testo.group(2))
+            anno = int(match_testo.group(3))
+
+            if mese:
+                return datetime(anno, mese, giorno)
+
+        return None
+
+    for link in soup.find_all("a", href=True):
+        url = urljoin(url_base, link.get("href", ""))
+
+        if url.rstrip("/") == url_base.rstrip("/"):
+            continue
+
+        contenitore = link.parent
+        blocco = None
+
+        for _ in range(6):
+            if not contenitore:
+                break
+
+            testo = pulisci_testo(contenitore.get_text(" ", strip=True))
+
+            if len(testo) > 60 and (
+                "scadenza" in testo.lower()
+                or "sportello aperto" in testo.lower()
+                or "dal " in testo.lower()
+            ):
+                blocco = contenitore
+                break
+
+            contenitore = contenitore.parent
+
+        if not blocco:
+            continue
+
+        testo = pulisci_testo(blocco.get_text(" ", strip=True))
+        testo_basso = testo.lower()
+
+        if contiene_esclusioni(testo):
+            continue
+
+        if not riguarda_agricoltura(testo):
+            continue
+
+        match_misura = re.search(
+            r"\b(?:Intervento\s+)?SR[A-Z]?\s?\d{2}\b",
+            testo,
+            flags=re.IGNORECASE,
+        )
+
+        if not match_misura:
+            continue
+
+        scadenza = cerca_scadenza(testo)
+        data_scadenza = parse_data(scadenza)
+
+        sportello = "sportello aperto" in testo_basso
+
+        if not sportello and (not data_scadenza or data_scadenza < datetime.now()):
+            continue
+
+        titolo_tag = blocco.find(["h1", "h2", "h3", "h4", "strong", "b"])
+
+        titolo = (
+            pulisci_testo(titolo_tag.get_text(" ", strip=True))
+            if titolo_tag
+            else testo
+        )
+
+        titolo = re.sub(
+            r"(Scadenza:|Sportello aperto:|Dal ).*",
+            "",
+            titolo,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        titolo = pulisci_testo(titolo)
+
+        if len(titolo) < 25:
+            titolo = pulisci_testo(testo)
+
+        if len(titolo) < 25:
+            continue
+
+        chiave = (titolo.lower(), url.lower())
+
+        if chiave in visti:
+            continue
+
+        visti.add(chiave)
+
+        stato = "Sportello aperto" if sportello else "Aperto"
+
+        record = crea_record(
+            "da impostare",
+            titolo,
+            url,
+            testo,
+            stato=stato,
+            categoria="CSR / PSR / Sviluppo rurale",
+        )
+
+        record["scadenza"] = scadenza
+        risultati.append(record)
+
+    return risultati
 
 FONTI_HTML = {
     "Basilicata": {
@@ -1256,4 +1395,44 @@ FONTI_HTML = {
         "url": "https://www.regione.vda.it/agricoltura/CSR_2023_2027/bandi_interventi_strutturali/default_i.aspx",
         "estrattore": estrai_valle_daosta,
     },
-        }
+    "Abruzzo": {
+        "url": "https://www.regione.abruzzo.it/contenuti/sviluppo-rurale",
+        "estrattore": estrai_generico,
+    },
+    "Calabria": {
+        "url": "https://csr.regione.calabria.it/",
+        "estrattore": estrai_generico,
+    },
+    "Friuli-Venezia Giulia": {
+        "url": "https://www.regione.fvg.it/rafvg/cms/RAFVG/economia-imprese/agricoltura-foreste/psr-programma-sviluppo-rurale/FOGLIA116/",
+        "estrattore": estrai_generico,
+    },
+    "Lazio": {
+        "url": "https://www.regione.lazio.it/enti/agricoltura",
+        "estrattore": estrai_generico,
+    },
+    "Liguria": {
+        "url": "https://www.agriligurianet.it/it/impresa/sostegno-economico/programma-di-sviluppo-rurale-psr-liguria/csr-2023-2027/bandi-aperti-csr-2023-2027.html",
+        "estrattore": estrai_generico,
+    },
+    "Molise": {
+        "url": "https://www.svilupporuralemolise.it/bandi-csr/",
+        "estrattore": estrai_generico,
+    },
+    "Umbria": {
+        "url": "https://applicazioni.regione.umbria.it/widget/bandi1/-/bandi_WAR_bandiportlet",
+        "estrattore": estrai_generico,
+    },
+    "Veneto": {
+        "url": "https://www.regione.veneto.it/web/agricoltura-e-foreste/bandi-finanziamenti",
+        "estrattore": estrai_generico,
+    },
+    "Trentino-Alto Adige": {
+        "url": "https://srt.infotn.it/Public/Bandi.aspx",
+        "estrattore": estrai_generico,
+    },
+    "Provincia autonoma di Bolzano": {
+        "url": "https://agricoltura.provincia.bz.it/it/bandi-accettazione-delle-domande-di-aiuto",
+        "estrattore": estrai_generico,
+    },
+}
