@@ -146,7 +146,7 @@ Testo della pagina:
             "aliquota": str(dati.get("aliquota", valori_base["aliquota"])),
         }
 
-        except Exception as errore:
+    except Exception as errore:
         print(
             f"      Gemini non ha estratto i dettagli per "
             f"'{bando['titolo'][:60]}': {errore}"
