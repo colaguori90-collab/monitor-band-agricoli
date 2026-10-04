@@ -90,7 +90,11 @@ def analizza_bando_con_gemini(bando, testo_dettaglio):
         "aliquota": "non specificata",
     }
 
-    if not testo_dettaglio or len(testo_dettaglio) < 250:
+        if not testo_dettaglio or len(testo_dettaglio) < 250:
+        print(
+            f"      Dettaglio troppo breve per Gemini: "
+            f"{len(testo_dettaglio or '')} caratteri"
+        )
         return valori_base
 
     prompt = f"""
@@ -142,8 +146,11 @@ Testo della pagina:
             "aliquota": str(dati.get("aliquota", valori_base["aliquota"])),
         }
 
-    except Exception as errore:
-        print(f"      ⚠️ Gemini non ha estratto i dettagli: {errore}")
+        except Exception as errore:
+        print(
+            f"      Gemini non ha estratto i dettagli per "
+            f"'{bando['titolo'][:60]}': {errore}"
+        )
         return valori_base
 
 
