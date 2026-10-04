@@ -101,7 +101,7 @@ Per ogni bando aperto trovato, crea un oggetto JSON con:
 - "aliquota": percentuale contribuzione (es. "40%", "50%", "non specificata")
 
 Testo da analizzare:
-{text_bando}
+{testo_bando}
 
 IMPORTANTE: Rispondi SOLO con un array JSON valido. Esempio:
 [{{"titolo": "...", "scadenza": "...", "descrizione": "...", "importo": "...", "aliquota": "..."}}]
