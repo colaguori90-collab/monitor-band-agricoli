@@ -167,58 +167,80 @@ def elimina_duplicati(bandi):
 def estrai_campania(html_pagina, url_base):
     """
     Campania:
-    legge esclusivamente la tabella contenuta nella sezione id="csr".
-    Per ogni riga usa:
-    - prima cella: titolo;
-    - seconda cella: scadenza;
-    - terza cella: link diretto.
+    tenta prima la sezione id='csr'.
+    Se non la trova, cerca qualsiasi tabella che contenga il codice SRD06
+    oppure una riga con bando + scadenza + link.
     """
     soup = BeautifulSoup(html_pagina, "lxml")
     risultati = []
 
+    sezioni_da_controllare = []
+
     sezione_csr = soup.find(id="csr")
+    if sezione_csr:
+        sezioni_da_controllare.append(sezione_csr)
 
-    if not sezione_csr:
-        print("      Campania: sezione CSR non trovata")
-        return risultati
+    # Fallback: alcuni siti cambiano struttura o omettono l'id.
+    for tabella in soup.find_all("table"):
+        testo_tabella = pulisci_testo(tabella.get_text(" ", strip=True)).lower()
 
-    for riga in sezione_csr.find_all("tr"):
-        celle = riga.find_all("td")
+        if (
+            "complemento di sviluppo rurale" in testo_tabella
+            or "srd06" in testo_tabella
+            or "csr 2023" in testo_tabella
+        ):
+            sezioni_da_controllare.append(tabella)
 
-        if len(celle) != 3:
-            continue
+    visti_righe = set()
 
-        titolo = pulisci_testo(celle[0].get_text(" ", strip=True))
-        scadenza = pulisci_testo(celle[1].get_text(" ", strip=True))
-        link = celle[2].find("a", href=True)
+    for sezione in sezioni_da_controllare:
+        for riga in sezione.find_all("tr"):
+            celle = riga.find_all("td")
 
-        if not titolo:
-            continue
+            if len(celle) < 3:
+                continue
 
-        if "nessun bando aperto" in titolo.lower():
-            continue
+            titolo = pulisci_testo(celle[0].get_text(" ", strip=True))
+            scadenza = pulisci_testo(celle[1].get_text(" ", strip=True))
+            link = celle[-1].find("a", href=True)
 
-        if contiene_esclusioni(titolo):
-            continue
+            if not titolo or "nessun bando aperto" in titolo.lower():
+                continue
 
-        if not link:
-            continue
+            if not link:
+                continue
 
-        url = urljoin(url_base, link["href"])
+            # Deve essere una misura specifica CSR/PSR/GAL.
+            titolo_basso = titolo.lower()
+            if not (
+                re.search(r"\bSR[A-Z]?\d{2}\b", titolo, flags=re.IGNORECASE)
+                or "bando" in titolo_basso
+                or "avviso" in titolo_basso
+                or "gal" in titolo_basso
+            ):
+                continue
 
-        record = crea_record(
-            "Campania",
-            titolo,
-            url,
-            scadenza,
-            stato="Aperto",
-            categoria="CSR 2023-2027",
-        )
+            url = urljoin(url_base, link["href"])
 
-        record["scadenza"] = scadenza or "non specificata"
-        risultati.append(record)
+            chiave = (titolo.lower(), url.lower())
+            if chiave in visti_righe:
+                continue
 
-    print(f"      Campania: estratti {len(risultati)} bandi CSR")
+            visti_righe.add(chiave)
+
+            record = crea_record(
+                "Campania",
+                titolo,
+                url,
+                scadenza,
+                stato="Aperto",
+                categoria="CSR 2023-2027"
+            )
+
+            record["scadenza"] = scadenza or "non specificata"
+            risultati.append(record)
+
+    print(f"      Campania: estratti {len(risultati)} bandi")
     return elimina_duplicati(risultati)
 
 
