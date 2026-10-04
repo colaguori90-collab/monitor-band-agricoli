@@ -47,7 +47,22 @@ PAROLE_ESCLUSE = (
     "feampa",
     "pesca",
     "acquacoltura",
-)
+    "privacy",
+    "informazioni legali",
+    "note legali",
+    "newsletter",
+    "categorie di articoli",
+    "categorie di articoli",
+    "altre pagine",
+    "anagrafe agricola",
+    "servizi forestali",
+    "servizi per l’agricoltura",
+    "griglie di riduzione",
+    "riduzione/esclusione",
+    "riduzione ed esclusione",
+    "approvate le griglie",
+    "bando scaduto",
+    "bandi chiusi",)
 
 PAROLE_AGRICOLTURA = (
     "agricolt",
@@ -170,51 +185,84 @@ def elimina_duplicati(bandi):
 
 def estrai_campania(html_pagina, url_base):
     """
-    Include solamente:
-    - CSR 2023-2027
-    - PSR 2014-2022, se la riga è ancora aperta
-    - GAL
-
-    Esclude FEAMPA/pesca, manifestazioni, eventi e comunicazioni.
+    Campania:
+    - cerca le righe delle tabelle CSR/PSR e le righe GAL;
+    - esclude le pagine-indice generiche tipo 'Bandi CSR a cura dei GAL';
+    - conserva solo righe con un singolo intervento/bando.
     """
     soup = BeautifulSoup(html_pagina, "lxml")
     risultati = []
+
+    parole_bando = (
+        "srd", "sra", "srb", "sre", "srg", "srh",
+        "bando", "avviso pubblico", "intervento"
+    )
+
+    parole_da_escludere = (
+        "bandi csr a cura dei gal",
+        "bandi psr a cura dei gal",
+        "archivio",
+        "calendario",
+        "elenco",
+        "modulistica",
+        "fiera",
+        "evento",
+        "feampa",
+        "pesca",
+    )
 
     for riga in soup.find_all("tr"):
         testo = pulisci_testo(riga.get_text(" ", strip=True))
         testo_basso = testo.lower()
 
-        if len(testo) < 20:
+        if len(testo) < 25:
             continue
 
         if contiene_esclusioni(testo):
             continue
 
-        # Ammessi: CSR/PSR o GAL.
-        if not (
-            "csr" in testo_basso
-            or "psr" in testo_basso
-            or "gal" in testo_basso
-            or any(codice in testo_basso for codice in ("srd", "sra", "srb", "sre", "srg", "srh"))
-        ):
+        if any(parola in testo_basso for parola in parole_da_escludere):
             continue
 
-        # Evita righe che non sono bandi/misure.
-        if not (
-            "bando" in testo_basso
-            or "avviso" in testo_basso
-            or "intervento" in testo_basso
-            or "gal" in testo_basso
-        ):
+        if not any(parola in testo_basso for parola in parole_bando):
             continue
 
-        link = riga.find("a", href=True)
+        # Una riga utile deve avere il link della sua pagina di dettaglio.
+        candidati = riga.find_all("a", href=True)
+
+        if not candidati:
+            continue
+
+        link = None
+
+        for candidato in candidati:
+            testo_link = pulisci_testo(candidato.get_text(" ", strip=True)).lower()
+            href = candidato.get("href", "").lower()
+
+            # Preferisce il pulsante di dettaglio presente nella riga.
+            if (
+                "vai alla pagina" in testo_link
+                or "dettaglio" in testo_link
+                or "bando" in href
+                or "comunicato" in href
+            ):
+                link = candidato
+                break
+
         if not link:
-            continue
+            link = candidati[-1]
 
         url = urljoin(url_base, link["href"])
 
         if url.rstrip("/") == url_base.rstrip("/"):
+            continue
+
+        # Deve essere una misura specifica, non un indice.
+        if not re.search(
+            r"\b(SRD|SRA|SRB|SRE|SRG|SRH)\s*\d{2}\b",
+            testo,
+            flags=re.IGNORECASE
+        ) and "bando" not in testo_basso:
             continue
 
         titolo = re.sub(
@@ -223,6 +271,9 @@ def estrai_campania(html_pagina, url_base):
             testo,
             flags=re.IGNORECASE
         ).strip()
+
+        if len(titolo) < 20:
+            continue
 
         risultati.append(
             crea_record(
@@ -236,7 +287,6 @@ def estrai_campania(html_pagina, url_base):
         )
 
     return elimina_duplicati(risultati)
-
 
 # ============================================================
 # FRIULI-VENEZIA GIULIA
@@ -351,46 +401,69 @@ def estrai_molise(html_pagina, url_base):
 
 def estrai_piemonte(html_pagina, url_base):
     """
-    Calendario bandi Piemonte:
-    ogni opportunità ha di norma titolo, scadenza e link diretto.
+    Piemonte:
+    prende esclusivamente le card del calendario bandi.
+    Ignora titoli generici dell'header, footer, menu e pagine editoriali.
     """
     soup = BeautifulSoup(html_pagina, "lxml")
     risultati = []
 
-    for titolo_tag in soup.find_all(["h2", "h3", "h4"]):
-        titolo = pulisci_testo(titolo_tag.get_text(" ", strip=True))
+    parole_agricole_specifiche = (
+        "csr", "psr", "srd", "sra", "srb", "sre",
+        "srg", "srh", "agricol", "cooperative agricole",
+        "imprenditori agricoli", "agroalimentare", "rurale"
+    )
 
-        if len(titolo) < 12:
+    for link in soup.find_all("a", href=True):
+        titolo = pulisci_testo(link.get_text(" ", strip=True))
+        href = link.get("href", "")
+        url = urljoin(url_base, href)
+
+        titolo_basso = titolo.lower()
+
+        if len(titolo) < 25:
             continue
 
         if contiene_esclusioni(titolo):
             continue
 
-        contenitore = titolo_tag.parent
-        testo = pulisci_testo(contenitore.get_text(" ", strip=True)) if contenitore else titolo
-
-        if not riguarda_agricoltura(f"{titolo} {testo}"):
+        # Solo URL del portale ufficiale bandi Piemonte.
+        if "bandi.regione.piemonte.it" not in url:
             continue
 
-        link = titolo_tag.find("a", href=True)
-
-        if not link and contenitore:
-            link = contenitore.find("a", href=True)
-
-        if not link:
+        # Il titolo deve riferirsi in modo esplicito ad agricoltura/CSR.
+        if not any(parola in titolo_basso for parola in parole_agricole_specifiche):
             continue
 
-        url = urljoin(url_base, link["href"])
-
-        if url.rstrip("/") == url_base.rstrip("/"):
+        # Esclude pagina listing, search e navigazione.
+        if (
+            url.rstrip("/") == "https://bandi.regione.piemonte.it/contributi-finanziamenti"
+            or "archivio" in url.lower()
+            or "categorie" in url.lower()
+        ):
             continue
+
+        contenitore = link.parent
+        testo_vicino = titolo
+
+        for _ in range(4):
+            if not contenitore:
+                break
+
+            testo_temp = pulisci_testo(contenitore.get_text(" ", strip=True))
+
+            if "scadenza" in testo_temp.lower():
+                testo_vicino = testo_temp
+                break
+
+            contenitore = contenitore.parent
 
         risultati.append(
             crea_record(
                 "Piemonte",
                 titolo,
                 url,
-                testo,
+                testo_vicino,
                 stato="Aperto",
                 categoria="CSR / Agricoltura"
             )
@@ -405,47 +478,65 @@ def estrai_piemonte(html_pagina, url_base):
 
 def estrai_sicilia(html_pagina, url_base):
     """
-    Categoria WordPress 'Bandi aperti'.
-    Inserisce solo veri bandi/interventi e scarta rettifiche,
-    graduatorie, griglie di riduzione e comunicazioni successive.
+    Sicilia:
+    usa la categoria ufficiale 'Bandi aperti', ma elimina atti
+    successivi come griglie, rettifiche, proroghe e graduatorie.
     """
     soup = BeautifulSoup(html_pagina, "lxml")
     risultati = []
 
     parole_necessarie = (
         "bando",
-        "intervento srd",
-        "intervento sra",
-        "intervento srb",
-        "intervento sre",
-        "intervento srg",
-        "intervento srh",
+        "bando attuativo",
         "avviso pubblico",
+    )
+
+    parole_scarto = (
+        "griglie",
+        "riduzione",
+        "esclusione",
+        "rettifica",
+        "proroga",
+        "graduatoria",
+        "elenco",
+        "ammissibili",
+        "non ammissibili",
+        "pagamento",
+        "istruzioni",
+        "faq",
     )
 
     for titolo_tag in soup.find_all(["h2", "h3", "h4"]):
         titolo = pulisci_testo(titolo_tag.get_text(" ", strip=True))
         titolo_basso = titolo.lower()
 
-        if len(titolo) < 12:
+        if len(titolo) < 18:
             continue
 
         if contiene_esclusioni(titolo):
             continue
 
-        if not any(parola in titolo_basso for parola in parole_necessarie):
+        if any(parola in titolo_basso for parola in parole_scarto):
+            continue
+
+        # È ammesso se parla di bando/avviso oppure di un intervento SR*
+        if not (
+            any(parola in titolo_basso for parola in parole_necessarie)
+            or re.search(r"\bSR[A-Z]?\d{2}\b", titolo, flags=re.IGNORECASE)
+        ):
             continue
 
         link = titolo_tag.find("a", href=True)
-
         if not link:
             continue
+
+        url = urljoin(url_base, link["href"])
 
         risultati.append(
             crea_record(
                 "Sicilia",
                 titolo,
-                urljoin(url_base, link["href"]),
+                url,
                 titolo,
                 stato="Aperto",
                 categoria="CSR / Sviluppo rurale"
@@ -512,51 +603,78 @@ def estrai_valle_aosta(html_pagina, url_base):
 
 def estrai_basilicata(html_pagina, url_base):
     """
-    SIA-RB:
-    mantiene i link contenuti nella sezione 'Bandi in corso'
-    ed esclude quelli che seguono 'Bandi Regionali scaduti'.
+    Basilicata:
+    estrae soltanto i link situati nella sezione 'Bandi in corso'.
+    Non prende menu come Anagrafe, Servizi forestali o Servizi agricoltura.
     """
     soup = BeautifulSoup(html_pagina, "lxml")
     risultati = []
+
     in_corso = False
 
-    for elemento in soup.find_all(["h1", "h2", "h3", "h4", "a", "li", "p", "div"]):
+    for elemento in soup.find_all(["h1", "h2", "h3", "h4", "a", "li", "p"]):
         testo = pulisci_testo(elemento.get_text(" ", strip=True))
         testo_basso = testo.lower()
 
-        if "bandi in corso" in testo_basso:
-            in_corso = True
-            continue
+        if elemento.name in ("h1", "h2", "h3", "h4"):
+            if "bandi in corso" in testo_basso:
+                in_corso = True
+                continue
 
-        if "bandi regionali scaduti" in testo_basso or "bandi scaduti" in testo_basso:
-            in_corso = False
+            if (
+                "bandi scaduti" in testo_basso
+                or "bandi regionali scaduti" in testo_basso
+                or "archivio" in testo_basso
+            ):
+                in_corso = False
+                continue
 
-        if not in_corso:
-            continue
-
-        if elemento.name != "a":
+        if not in_corso or elemento.name != "a":
             continue
 
         titolo = testo
 
-        if len(titolo) < 15:
+        if len(titolo) < 30:
             continue
 
         if contiene_esclusioni(titolo):
             continue
 
-        if not riguarda_agricoltura(titolo):
+        # Deve essere effettivamente un bando/avviso/contributo,
+        # non un collegamento ai servizi generali.
+        titolo_basso = titolo.lower()
+        if not any(
+            parola in titolo_basso
+            for parola in (
+                "bando",
+                "avviso",
+                "contribut",
+                "sostegno",
+                "aiuto",
+                "allev",
+                "agricolt",
+                "zootecn",
+                "forest",
+                "csr",
+                "psr",
+            )
+        ):
             continue
 
         href = elemento.get("href", "")
         if not href:
             continue
 
+        url = urljoin(url_base, href)
+
+        if url.rstrip("/") == url_base.rstrip("/"):
+            continue
+
         risultati.append(
             crea_record(
                 "Basilicata",
                 titolo,
-                urljoin(url_base, href),
+                url,
                 titolo,
                 stato="Aperto",
                 categoria="Agricoltura / Sviluppo rurale"
@@ -564,7 +682,6 @@ def estrai_basilicata(html_pagina, url_base):
         )
 
     return elimina_duplicati(risultati)
-
 
 # ============================================================
 # FONTI ESTRATTORE
@@ -574,18 +691,12 @@ FONTI_HTML = {
     "Campania": {
         "url": "https://agricoltura.regione.campania.it/bandi.html",
         "estrattore": estrai_campania,
-    },
-    "Friuli-Venezia Giulia": {
-        "url": "https://www.opr.fvg.it/it/bandi-e-scadenze-per-la-presentazione-delle-domande-86876/bandi-aperti-72911",
-        "estrattore": estrai_fvg,
+    
     },
     "Basilicata": {
         "url": "https://agricoltura.regione.basilicata.it/bandi-regionali/",
         "estrattore": estrai_basilicata,
-    },
-    "Molise": {
-        "url": "https://psr.regione.molise.it/aperti23-27",
-        "estrattore": estrai_molise,
+    
     },
     "Piemonte": {
         "url": "https://quaderniagricoltura.regione.piemonte.it/calendario-bandi/",
