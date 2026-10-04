@@ -32,7 +32,7 @@ if not GMAIL_USER or not GMAIL_PASSWORD or not DESTINATARIO:
     )
 
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-2.5-flash")
+model = genai.GenerativeModel("gemini-3.8-flash")
 
 
 # ============================================================
