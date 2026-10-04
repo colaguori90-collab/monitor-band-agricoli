@@ -702,22 +702,28 @@ def estrai_sicilia(html_pagina, url_base):
 def estrai_marche(html_pagina, url_base):
     """
     Marche:
-    estrae i bandi con scadenza futura dalla pagina ufficiale
-    'Bandi di finanziamento'.
-    Esclude FEAMPA, graduatorie, esiti e comunicazioni non bandi.
+    estrae i bandi con scadenza futura dalla pagina ufficiale.
+    Non richiede che il link abbia un testo specifico.
     """
     soup = BeautifulSoup(html_pagina, "lxml")
     risultati = []
+    visti = set()
 
     for link in soup.find_all("a", href=True):
-        testo_link = pulisci_testo(link.get_text(" ", strip=True))
+        url = urljoin(url_base, link.get("href", ""))
 
-        if testo_link.lower() != "leggi":
+        # Evita link interni di navigazione, ancore e pagine generiche.
+        if not url.startswith("http"):
+            continue
+
+        if url.rstrip("/") == url_base.rstrip("/"):
             continue
 
         contenitore = link.parent
+        blocco_trovato = None
 
-        for _ in range(6):
+        # Risale al massimo 8 livelli cercando un blocco con la scadenza.
+        for _ in range(8):
             if not contenitore:
                 break
 
@@ -726,15 +732,16 @@ def estrai_marche(html_pagina, url_base):
             )
 
             if "Scadenza:" in testo_blocco:
+                blocco_trovato = contenitore
                 break
 
             contenitore = contenitore.parent
 
-        if not contenitore:
+        if not blocco_trovato:
             continue
 
         testo_blocco = pulisci_testo(
-            contenitore.get_text(" ", strip=True)
+            blocco_trovato.get_text(" ", strip=True)
         )
         testo_basso = testo_blocco.lower()
 
@@ -747,8 +754,11 @@ def estrai_marche(html_pagina, url_base):
         if not riguarda_agricoltura(testo_blocco):
             continue
 
+        # Accetta più formati di data.
         match_scadenza = re.search(
-            r"Scadenza:\s*([0-9]{2}/[0-9]{2}/[0-9]{4})",
+            r"Scadenza:\s*"
+            r"([0-9]{2}/[0-9]{2}/[0-9]{4}"
+            r"|[0-9]{1,2}\s+[a-zàèéìòù]+\s+[0-9]{4})",
             testo_blocco,
             flags=re.IGNORECASE,
         )
@@ -756,45 +766,69 @@ def estrai_marche(html_pagina, url_base):
         if not match_scadenza:
             continue
 
-        scadenza = match_scadenza.group(1)
+        scadenza = pulisci_testo(match_scadenza.group(1))
 
-        # Esclude bandi già scaduti rispetto alla data di elaborazione.
+        data_scadenza = None
+
         try:
-            giorno, mese, anno = map(int, scadenza.split("/"))
-            data_scadenza = datetime(anno, mese, giorno)
-            if data_scadenza < datetime.now():
-                continue
+            if "/" in scadenza:
+                giorno, mese, anno = map(int, scadenza.split("/"))
+                data_scadenza = datetime(anno, mese, giorno)
+            else:
+                data_scadenza = datetime.strptime(
+                    scadenza,
+                    "%d %B %Y"
+                )
         except Exception:
             continue
 
-        # Ricostruisce un titolo pulito.
-        titolo = testo_blocco
-        titolo = re.sub(r"^Regione Marche\s*", "", titolo, flags=re.IGNORECASE)
-        titolo = re.sub(
-            r"Scadenza:\s*[0-9]{2}/[0-9]{2}/[0-9]{4}",
-            "",
-            titolo,
-            flags=re.IGNORECASE,
+        if data_scadenza < datetime.now():
+            continue
+
+        # Titolo: usa prima un heading nel blocco, poi il testo pulito.
+        titolo_tag = blocco_trovato.find(
+            ["h1", "h2", "h3", "h4", "h5", "strong", "b"]
         )
+
+        if titolo_tag:
+            titolo = pulisci_testo(
+                titolo_tag.get_text(" ", strip=True)
+            )
+        else:
+            titolo = testo_blocco
+
         titolo = re.sub(
-            r"Data pubblicazione graduatoria:.*?(?=Bando per la concessione|$)",
+            r"Scadenza:\s*.*$",
             "",
             titolo,
             flags=re.IGNORECASE | re.DOTALL,
         )
         titolo = re.sub(
-            r"Bando per la concessione di contributi\s*",
+            r"^Regione Marche\s*",
             "",
             titolo,
             flags=re.IGNORECASE,
         )
-        titolo = re.sub(r"\s*Leggi\s*$", "", titolo, flags=re.IGNORECASE)
+        titolo = re.sub(
+            r"\s*Leggi\s*$",
+            "",
+            titolo,
+            flags=re.IGNORECASE,
+        )
         titolo = pulisci_testo(titolo)
+
+        if len(titolo) < 25:
+            titolo = pulisci_testo(testo_blocco)
 
         if len(titolo) < 25:
             continue
 
-        url = urljoin(url_base, link["href"])
+        chiave = (titolo.lower(), url.lower())
+
+        if chiave in visti:
+            continue
+
+        visti.add(chiave)
 
         risultati.append(
             crea_record(
