@@ -701,148 +701,55 @@ def estrai_sicilia(html_pagina, url_base):
     return elimina_duplicati(risultati)
 def estrai_marche(html_pagina, url_base):
     """
-    Marche:
-    estrae i bandi con scadenza futura dalla pagina ufficiale.
-    Non richiede che il link abbia un testo specifico.
+    Marche: versione diagnostica temporanea.
+    Stampa cosa vede lo script nella pagina per capire perché non estrae bandi.
     """
     soup = BeautifulSoup(html_pagina, "lxml")
     risultati = []
-    visti = set()
 
-    for link in soup.find_all("a", href=True):
-        url = urljoin(url_base, link.get("href", ""))
+    testo_pagina = pulisci_testo(soup.get_text(" ", strip=True))
+    testo_pagina_basso = testo_pagina.lower()
 
-        # Evita link interni di navigazione, ancore e pagine generiche.
-        if not url.startswith("http"):
-            continue
+    print("      Marche: lunghezza HTML:", len(html_pagina))
+    print("      Marche: lunghezza testo:", len(testo_pagina))
+    print("      Marche: numero link:", len(soup.find_all("a")))
+    print("      Marche: contiene 'Scadenza':", "scadenza" in testo_pagina_basso)
+    print("      Marche: contiene 'CSR':", "csr" in testo_pagina_basso)
+    print("      Marche: contiene 'SRD':", "srd" in testo_pagina_basso)
+    print("      Marche: contiene 'GAL':", "gal" in testo_pagina_basso)
 
-        if url.rstrip("/") == url_base.rstrip("/"):
-            continue
+    # Stampa i primi 600 caratteri del testo visibile.
+    print("      Marche: inizio testo pagina:")
+    print("      " + testo_pagina[:600].replace("\n", " "))
 
-        contenitore = link.parent
-        blocco_trovato = None
+    # Cerca tutte le occorrenze di 'Scadenza' e stampa il contesto.
+    posizioni = [
+        match.start()
+        for match in re.finditer(r"scadenza", testo_pagina_basso)
+    ]
 
-        # Risale al massimo 8 livelli cercando un blocco con la scadenza.
-        for _ in range(8):
-            if not contenitore:
-                break
+    print("      Marche: occorrenze 'Scadenza':", len(posizioni))
 
-            testo_blocco = pulisci_testo(
-                contenitore.get_text(" ", strip=True)
-            )
+    for indice, posizione in enumerate(posizioni[:5], start=1):
+        contesto = testo_pagina[
+            max(0, posizione - 150): posizione + 250
+        ]
 
-            if "Scadenza:" in testo_blocco:
-                blocco_trovato = contenitore
-                break
+        print(f"      Marche: contesto scadenza {indice}:")
+        print("      " + pulisci_testo(contesto))
 
-            contenitore = contenitore.parent
+    # Stampa i primi 20 link non di navigazione.
+    print("      Marche: primi link trovati:")
 
-        if not blocco_trovato:
-            continue
+    for indice, link in enumerate(soup.find_all("a", href=True)[:20], start=1):
+        testo_link = pulisci_testo(link.get_text(" ", strip=True))
+        href = link.get("href", "")
 
-        testo_blocco = pulisci_testo(
-            blocco_trovato.get_text(" ", strip=True)
-        )
-        testo_basso = testo_blocco.lower()
-
-        if "scadenza:" not in testo_basso:
-            continue
-
-        if contiene_esclusioni(testo_blocco):
-            continue
-
-        if not riguarda_agricoltura(testo_blocco):
-            continue
-
-        # Accetta più formati di data.
-        match_scadenza = re.search(
-            r"Scadenza:\s*"
-            r"([0-9]{2}/[0-9]{2}/[0-9]{4}"
-            r"|[0-9]{1,2}\s+[a-zàèéìòù]+\s+[0-9]{4})",
-            testo_blocco,
-            flags=re.IGNORECASE,
+        print(
+            f"      {indice}. testo='{testo_link[:100]}' | href='{href[:180]}'"
         )
 
-        if not match_scadenza:
-            continue
-
-        scadenza = pulisci_testo(match_scadenza.group(1))
-
-        data_scadenza = None
-
-        try:
-            if "/" in scadenza:
-                giorno, mese, anno = map(int, scadenza.split("/"))
-                data_scadenza = datetime(anno, mese, giorno)
-            else:
-                data_scadenza = datetime.strptime(
-                    scadenza,
-                    "%d %B %Y"
-                )
-        except Exception:
-            continue
-
-        if data_scadenza < datetime.now():
-            continue
-
-        # Titolo: usa prima un heading nel blocco, poi il testo pulito.
-        titolo_tag = blocco_trovato.find(
-            ["h1", "h2", "h3", "h4", "h5", "strong", "b"]
-        )
-
-        if titolo_tag:
-            titolo = pulisci_testo(
-                titolo_tag.get_text(" ", strip=True)
-            )
-        else:
-            titolo = testo_blocco
-
-        titolo = re.sub(
-            r"Scadenza:\s*.*$",
-            "",
-            titolo,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
-        titolo = re.sub(
-            r"^Regione Marche\s*",
-            "",
-            titolo,
-            flags=re.IGNORECASE,
-        )
-        titolo = re.sub(
-            r"\s*Leggi\s*$",
-            "",
-            titolo,
-            flags=re.IGNORECASE,
-        )
-        titolo = pulisci_testo(titolo)
-
-        if len(titolo) < 25:
-            titolo = pulisci_testo(testo_blocco)
-
-        if len(titolo) < 25:
-            continue
-
-        chiave = (titolo.lower(), url.lower())
-
-        if chiave in visti:
-            continue
-
-        visti.add(chiave)
-
-        risultati.append(
-            crea_record(
-                "Marche",
-                titolo,
-                url,
-                testo_blocco,
-                stato="Aperto",
-                categoria="CSR / Agricoltura / Sviluppo rurale",
-            )
-        )
-
-    print(f"      Marche: estratti {len(risultati)} bandi")
-    return elimina_duplicati(risultati)
+    return risultati
 
 
 def estrai_valle_daosta(html_pagina, url_base):
