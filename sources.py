@@ -699,7 +699,192 @@ def estrai_sicilia(html_pagina, url_base):
         )
 
     return elimina_duplicati(risultati)
+def estrai_marche(html_pagina, url_base):
+    """
+    Marche:
+    estrae i bandi con scadenza futura dalla pagina ufficiale
+    'Bandi di finanziamento'.
+    Esclude FEAMPA, graduatorie, esiti e comunicazioni non bandi.
+    """
+    soup = BeautifulSoup(html_pagina, "lxml")
+    risultati = []
 
+    for link in soup.find_all("a", href=True):
+        testo_link = pulisci_testo(link.get_text(" ", strip=True))
+
+        if testo_link.lower() != "leggi":
+            continue
+
+        contenitore = link.parent
+
+        for _ in range(6):
+            if not contenitore:
+                break
+
+            testo_blocco = pulisci_testo(
+                contenitore.get_text(" ", strip=True)
+            )
+
+            if "Scadenza:" in testo_blocco:
+                break
+
+            contenitore = contenitore.parent
+
+        if not contenitore:
+            continue
+
+        testo_blocco = pulisci_testo(
+            contenitore.get_text(" ", strip=True)
+        )
+        testo_basso = testo_blocco.lower()
+
+        if "scadenza:" not in testo_basso:
+            continue
+
+        if contiene_esclusioni(testo_blocco):
+            continue
+
+        if not riguarda_agricoltura(testo_blocco):
+            continue
+
+        match_scadenza = re.search(
+            r"Scadenza:\s*([0-9]{2}/[0-9]{2}/[0-9]{4})",
+            testo_blocco,
+            flags=re.IGNORECASE,
+        )
+
+        if not match_scadenza:
+            continue
+
+        scadenza = match_scadenza.group(1)
+
+        # Esclude bandi già scaduti rispetto alla data di elaborazione.
+        try:
+            giorno, mese, anno = map(int, scadenza.split("/"))
+            data_scadenza = datetime(anno, mese, giorno)
+            if data_scadenza < datetime.now():
+                continue
+        except Exception:
+            continue
+
+        # Ricostruisce un titolo pulito.
+        titolo = testo_blocco
+        titolo = re.sub(r"^Regione Marche\s*", "", titolo, flags=re.IGNORECASE)
+        titolo = re.sub(
+            r"Scadenza:\s*[0-9]{2}/[0-9]{2}/[0-9]{4}",
+            "",
+            titolo,
+            flags=re.IGNORECASE,
+        )
+        titolo = re.sub(
+            r"Data pubblicazione graduatoria:.*?(?=Bando per la concessione|$)",
+            "",
+            titolo,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        titolo = re.sub(
+            r"Bando per la concessione di contributi\s*",
+            "",
+            titolo,
+            flags=re.IGNORECASE,
+        )
+        titolo = re.sub(r"\s*Leggi\s*$", "", titolo, flags=re.IGNORECASE)
+        titolo = pulisci_testo(titolo)
+
+        if len(titolo) < 25:
+            continue
+
+        url = urljoin(url_base, link["href"])
+
+        risultati.append(
+            crea_record(
+                "Marche",
+                titolo,
+                url,
+                testo_blocco,
+                stato="Aperto",
+                categoria="CSR / Agricoltura / Sviluppo rurale",
+            )
+        )
+
+    print(f"      Marche: estratti {len(risultati)} bandi")
+    return elimina_duplicati(risultati)
+
+
+def estrai_valle_daosta(html_pagina, url_base):
+    """
+    Valle d'Aosta:
+    estrae solo interventi CSR con 'SPORTELLO APERTO'
+    oppure scadenza nel futuro.
+    """
+    soup = BeautifulSoup(html_pagina, "lxml")
+    risultati = []
+
+    for elemento in soup.find_all(["li", "p", "div"]):
+        testo = pulisci_testo(elemento.get_text(" ", strip=True))
+        testo_basso = testo.lower()
+
+        if len(testo) < 30:
+            continue
+
+        aperto = "sportello aperto" in testo_basso
+        scadenza_futura = False
+        scadenza = "non specificata"
+
+        match = re.search(
+            r"scadenza\s+([0-9]{1,2}\s+[a-zàèéìòù]+\s+[0-9]{4})",
+            testo_basso,
+        )
+
+        if not match:
+            match = re.search(
+                r"scadenza\s+([0-9]{1,2}\s+[a-zàèéìòù]+\s+[0-9]{4})",
+                testo,
+                flags=re.IGNORECASE,
+            )
+
+        if match:
+            scadenza = pulisci_testo(match.group(1)).title()
+
+            try:
+                data_scadenza = datetime.strptime(
+                    scadenza,
+                    "%d %B %Y"
+                )
+                scadenza_futura = data_scadenza >= datetime.now()
+            except Exception:
+                scadenza_futura = False
+
+        if not aperto and not scadenza_futura:
+            continue
+
+        if contiene_esclusioni(testo):
+            continue
+
+        if not riguarda_agricoltura(testo):
+            continue
+
+        link = elemento.find("a", href=True)
+        url = url_base
+
+        if link:
+            url = urljoin(url_base, link["href"])
+
+        stato = "Sportello aperto" if aperto else "Aperto"
+
+        risultati.append(
+            crea_record(
+                "Valle d'Aosta",
+                testo,
+                url,
+                testo,
+                stato=stato,
+                categoria="CSR 2023-2027 / Agricoltura",
+            )
+        )
+
+    print(f"      Valle d'Aosta: estratti {len(risultati)} bandi")
+    return elimina_duplicati(risultati)
 
 FONTI_HTML = {
     "Basilicata": {
