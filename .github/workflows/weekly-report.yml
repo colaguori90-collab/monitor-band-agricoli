@@ -31,3 +31,63 @@ jobs:
         GMAIL_PASSWORD: ${{ secrets.GMAIL_PASSWORD }}
         DESTINATARIO_EMAIL: ${{ secrets.DESTINATARIO_EMAIL }}
       run: python main.py
+      - name: Crea cartella diagnostica
+        if: always()
+        run: mkdir -p diagnostica
+
+      - name: Scarica HTML Campania e Basilicata
+        if: always()
+        run: |
+          python - <<'PY'
+          import os
+          import requests
+
+          os.makedirs("diagnostica", exist_ok=True)
+
+          headers = {
+              "User-Agent": (
+                  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/124.0.0.0 Safari/537.36"
+              ),
+              "Accept-Language": "it-IT,it;q=0.9,en;q=0.8",
+          }
+
+          fonti = {
+              "campania": "https://agricoltura.regione.campania.it/bandi.html",
+              "basilicata": "https://agricoltura.regione.basilicata.it/bandi-regionali/",
+          }
+
+          for nome, url in fonti.items():
+              try:
+                  risposta = requests.get(url, headers=headers, timeout=45)
+                  risposta.raise_for_status()
+
+                  with open(
+                      f"diagnostica/{nome}.html",
+                      "w",
+                      encoding="utf-8"
+                  ) as file:
+                      file.write(risposta.text)
+
+                  print(f"{nome}: HTML salvato - {len(risposta.text)} caratteri")
+
+              except Exception as errore:
+                  with open(
+                      f"diagnostica/{nome}_errore.txt",
+                      "w",
+                      encoding="utf-8"
+                  ) as file:
+                      file.write(str(errore))
+
+                  print(f"{nome}: errore - {errore}")
+          PY
+
+      - name: Carica file diagnostici
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostica-fonti
+          path: diagnostica/
+          if-no-files-found: warn
+          retention-days: 7
