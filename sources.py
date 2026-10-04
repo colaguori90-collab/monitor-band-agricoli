@@ -184,86 +184,46 @@ def elimina_duplicati(bandi):
 # ============================================================
 
 def estrai_campania(html_pagina, url_base):
-    """
-    Campania:
-    legge esclusivamente le tabelle CSR e, se presenti, le tabelle GAL.
-    Ogni riga contiene:
-    - prima cella: titolo;
-    - seconda cella: scadenza;
-    - terza cella: pulsante 'Vai alla pagina'.
-    """
     soup = BeautifulSoup(html_pagina, "lxml")
     risultati = []
 
-    # Sezioni che vogliamo monitorare:
-    # CSR regionale + eventuali GAL.
-    sezioni = [
-        soup.find(id="csr"),
-        soup.find(id="gal"),
-    ]
+    sezione_csr = soup.find(id="csr")
 
-    for sezione in sezioni:
-        if not sezione:
+    if not sezione_csr:
+        print("      Campania: sezione CSR non trovata")
+        return risultati
+
+    for riga in sezione_csr.find_all("tr"):
+        celle = riga.find_all("td")
+
+        if len(celle) != 3:
             continue
 
-        categoria = "CSR 2023-2027"
+        titolo = pulisci_testo(celle[0].get_text(" ", strip=True))
+        scadenza = pulisci_testo(celle[1].get_text(" ", strip=True))
+        link = celle[2].find("a", href=True)
 
-        if sezione.get("id") == "gal":
-            categoria = "GAL / LEADER"
+        if not titolo or "nessun bando aperto" in titolo.lower():
+            continue
 
-        for riga in sezione.find_all("tr"):
-            celle = riga.find_all("td")
+        if not link:
+            continue
 
-            # Salta intestazioni e righe vuote.
-            if len(celle) < 3:
-                continue
+        url = urljoin(url_base, link["href"])
 
-            titolo = pulisci_testo(celle[0].get_text(" ", strip=True))
-            scadenza = pulisci_testo(celle[1].get_text(" ", strip=True))
+        record = crea_record(
+            "Campania",
+            titolo,
+            url,
+            scadenza,
+            stato="Aperto",
+            categoria="CSR 2023-2027"
+        )
 
-            if not titolo or "nessun bando aperto" in titolo.lower():
-                continue
+        record["scadenza"] = scadenza
+        risultati.append(record)
 
-            if contiene_esclusioni(titolo):
-                continue
-
-            # Il link specifico è nella terza colonna.
-            link = celle[2].find("a", href=True)
-
-            if not link:
-                continue
-
-            url = urljoin(url_base, link["href"])
-
-            # Non conservare eventuali rimandi alla pagina indice.
-            if url.rstrip("/") == url_base.rstrip("/"):
-                continue
-
-            # La riga deve identificare una misura/bando concreta.
-            # SRD06 passa certamente questo filtro.
-            titolo_basso = titolo.lower()
-            if not (
-                re.search(r"\bSR[A-Z]?\d{2}\b", titolo, flags=re.IGNORECASE)
-                or "bando" in titolo_basso
-                or "avviso" in titolo_basso
-                or "gal" in titolo_basso
-            ):
-                continue
-
-            record = crea_record(
-                "Campania",
-                titolo,
-                url,
-                f"Scadenza {scadenza}",
-                stato="Aperto",
-                categoria=categoria
-            )
-
-            # Mantiene il valore esatto della tabella, inclusa l'ora.
-            record["scadenza"] = scadenza or "non specificata"
-
-            risultati.append(record)
-
+    print(f"      Campania: estratti {len(risultati)} bandi CSR")
     return elimina_duplicati(risultati)
 
 # ============================================================
@@ -580,18 +540,9 @@ def estrai_valle_aosta(html_pagina, url_base):
 # ============================================================
 
 def estrai_basilicata(html_pagina, url_base):
-    """
-    Basilicata:
-    legge i bandi collocati dopo la scritta 'Bandi in corso'.
-    I titoli sono spesso in <li> senza link:
-    - usa il PDF 'Bando' come link diretto, se presente;
-    - altrimenti usa il pulsante con attributo data-url;
-    - esclude l'intero blocco quando incontra 'Bandi scaduti'.
-    """
     soup = BeautifulSoup(html_pagina, "lxml")
     risultati = []
 
-    # Trova il nodo con il testo "Bandi in corso".
     punto_inizio = None
 
     for tag in soup.find_all(["p", "strong", "b", "h1", "h2", "h3", "h4"]):
@@ -602,67 +553,62 @@ def estrai_basilicata(html_pagina, url_base):
             break
 
     if not punto_inizio:
+        print("      Basilicata: sezione 'Bandi in corso' non trovata")
         return risultati
 
-    # Esamina i fratelli successivi. Il sito struttura ogni bando
-    # come un <ul> che contiene uno o più <li>.
     nodo = punto_inizio.find_next_sibling()
 
     while nodo:
         testo_nodo = pulisci_testo(nodo.get_text(" ", strip=True))
         testo_basso = testo_nodo.lower()
 
-        # Fine della sezione monitorata.
-        if (
-            "bandi scaduti" in testo_basso
-            or "bandi regionali scaduti" in testo_basso
-        ):
+        if "bandi scaduti" in testo_basso:
             break
 
-        # Cerca un titolo di bando in un LI principale.
         if nodo.name == "ul":
-            elementi = nodo.find_all("li", recursive=False)
+            elementi_principali = nodo.find_all("li", recursive=False)
 
-            if elementi:
-                titolo = pulisci_testo(elementi[0].get_text(" ", strip=True))
+            if elementi_principali:
+                titolo = pulisci_testo(
+                    elementi_principali[0].get_text(" ", strip=True)
+                )
 
-                # Se il primo elemento è solo un contenitore vuoto,
-                # usa il testo dell'intero UL.
-                if len(titolo) < 20:
+                if len(titolo) < 25:
                     titolo = testo_nodo
 
+                titolo_basso = titolo.lower()
+
                 if (
-                    len(titolo) >= 20
+                    len(titolo) >= 25
                     and not contiene_esclusioni(titolo)
                     and any(
-                        parola in titolo.lower()
+                        parola in titolo_basso
                         for parola in (
+                            "avviso pubblico",
                             "bando",
-                            "avviso",
                             "sostegno",
-                            "allev",
-                            "agricolt",
-                            "zootecn",
+                            "allevamenti",
+                            "zootecnico",
                             "biosicurezza",
-                            "forest",
-                            "contribut",
+                            "agricoltura",
+                            "contributo",
                         )
                     )
                 ):
                     link_scelto = None
 
-                    # Preferenza: PDF che contiene la parola Bando.
+                    # Cerca un link soltanto DENTRO questo stesso UL.
                     for link in nodo.find_all("a", href=True):
+                        href = link.get("href", "").lower()
                         testo_link = pulisci_testo(
                             link.get_text(" ", strip=True)
                         ).lower()
-                        href = link.get("href", "").lower()
 
                         if "bando" in testo_link or "bando" in href:
                             link_scelto = link
                             break
 
-                    # Seconda scelta: primo PDF disponibile.
+                    # Se manca il PDF chiamato bando, usa un PDF del blocco.
                     if not link_scelto:
                         for link in nodo.find_all("a", href=True):
                             href = link.get("href", "").lower()
@@ -671,37 +617,19 @@ def estrai_basilicata(html_pagina, url_base):
                                 link_scelto = link
                                 break
 
-                    # Terza scelta: primo link normale.
-                    if not link_scelto:
-                        link_scelto = nodo.find("a", href=True)
-
+                    # Per i pulsanti con attributo data-url.
                     url = None
 
                     if link_scelto:
                         url = urljoin(url_base, link_scelto["href"])
-
-                    # Alcune righe hanno un bottone 'Dettagli' con data-url.
-                    if not url:
+                    else:
                         bottone = nodo.find(attrs={"data-url": True})
 
                         if bottone:
                             url = urljoin(url_base, bottone["data-url"])
 
-                    # Se non c'è il link nello stesso UL, controlla il nodo
-                    # immediatamente successivo: alcuni bandi sono spezzati
-                    # su due UL consecutivi.
-                    if not url:
-                        successivo = nodo.find_next_sibling()
-
-                        if successivo:
-                            link = successivo.find("a", href=True)
-                            bottone = successivo.find(attrs={"data-url": True})
-
-                            if link:
-                                url = urljoin(url_base, link["href"])
-                            elif bottone:
-                                url = urljoin(url_base, bottone["data-url"])
-
+                    # Se non c'è un link nel blocco, NON inserire il bando:
+                    # è meglio ometterlo che associargli una fonte sbagliata.
                     if url:
                         risultati.append(
                             crea_record(
@@ -716,6 +644,7 @@ def estrai_basilicata(html_pagina, url_base):
 
         nodo = nodo.find_next_sibling()
 
+    print(f"      Basilicata: estratti {len(risultati)} bandi")
     return elimina_duplicati(risultati)
 
 # ============================================================
