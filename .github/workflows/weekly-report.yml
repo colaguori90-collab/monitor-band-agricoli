@@ -38,7 +38,7 @@ jobs:
         if: always()
         run: mkdir -p diagnostica
 
-      - name: Scarica HTML Campania e Basilicata
+      - name: Scarica HTML fonti diagnostiche
         if: always()
         run: |
           python - <<'PY'
@@ -57,28 +57,37 @@ jobs:
           }
 
           fonti = {
-    "campania": "https://agricoltura.regione.campania.it/bandi.html",
-    "basilicata": "https://agricoltura.regione.basilicata.it/bandi-regionali/",
-    "puglia": "https://csr.regione.puglia.it/bandi",
-    "marche": "https://www.regione.marche.it/Entra-in-Regione/Bandi-e-opportunita/Bandi-attivi?p=1&t=103",
-}
+              "campania": "https://agricoltura.regione.campania.it/bandi.html",
+              "basilicata": "https://agricoltura.regione.basilicata.it/bandi-regionali/",
+              "puglia": "https://csr.regione.puglia.it/bandi",
+              "marche": "https://www.regione.marche.it/Entra-in-Regione/Bandi-e-opportunita/Bandi-attivi?p=1&t=103",
+          }
 
           for nome, url in fonti.items():
               try:
-                  risposta = requests.get(url, headers=headers, timeout=45)
+                  risposta = requests.get(
+                      url,
+                      headers=headers,
+                      timeout=45,
+                      allow_redirects=True,
+                  )
                   risposta.raise_for_status()
 
-                  percorso = f"diagnostica/{nome}.html"
-
-                  with open(percorso, "w", encoding="utf-8") as file:
+                  with open(
+                      f"diagnostica/{nome}.html",
+                      "w",
+                      encoding="utf-8",
+                  ) as file:
                       file.write(risposta.text)
 
-                  print(f"{nome}: HTML salvato - {len(risposta.text)} caratteri")
+                  print(f"{nome}: HTML salvato ({len(risposta.text)} caratteri)")
 
               except Exception as errore:
-                  percorso = f"diagnostica/{nome}_errore.txt"
-
-                  with open(percorso, "w", encoding="utf-8") as file:
+                  with open(
+                      f"diagnostica/{nome}_errore.txt",
+                      "w",
+                      encoding="utf-8",
+                  ) as file:
                       file.write(str(errore))
 
                   print(f"{nome}: errore - {errore}")
