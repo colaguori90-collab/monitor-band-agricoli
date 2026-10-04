@@ -826,7 +826,302 @@ def estrai_valle_daosta(html_pagina, url_base):
 
     print(f"      Valle d'Aosta: estratti {len(risultati)} bandi")
     return elimina_duplicati(risultati)
+def estrai_emilia_romagna(html_pagina, url_base):
+    """
+    Emilia-Romagna:
+    pagina 'Bandi aperti' con titolo, stato, scadenza e link alla scheda.
+    """
+    soup = BeautifulSoup(html_pagina, "lxml")
+    risultati = []
+    visti = set()
 
+    for link in soup.find_all("a", href=True):
+        url = urljoin(url_base, link.get("href", ""))
+
+        if url.rstrip("/") == url_base.rstrip("/"):
+            continue
+
+        contenitore = link.parent
+        blocco = None
+
+        for _ in range(8):
+            if not contenitore:
+                break
+
+            testo = pulisci_testo(contenitore.get_text(" ", strip=True))
+
+            if "Stato:" in testo and "Pubblicato il:" in testo:
+                blocco = contenitore
+                break
+
+            contenitore = contenitore.parent
+
+        if not blocco:
+            continue
+
+        testo = pulisci_testo(blocco.get_text(" ", strip=True))
+        testo_basso = testo.lower()
+
+        if "stato:" not in testo_basso:
+            continue
+
+        if "aperto" not in testo_basso:
+            continue
+
+        if contiene_esclusioni(testo):
+            continue
+
+        if not riguarda_agricoltura(testo):
+            continue
+
+        match_scadenza = re.search(
+            r"Scadenza:\s*([0-9]{1,2}-[0-9]{1,2}-[0-9]{4})",
+            testo,
+            flags=re.IGNORECASE,
+        )
+
+        scadenza = (
+            pulisci_testo(match_scadenza.group(1))
+            if match_scadenza
+            else "non specificata"
+        )
+
+        titolo_tag = blocco.find(["h1", "h2", "h3", "h4", "strong", "b"])
+        titolo = (
+            pulisci_testo(titolo_tag.get_text(" ", strip=True))
+            if titolo_tag
+            else testo
+        )
+
+        titolo = re.sub(
+            r"Pubblicato il:.*",
+            "",
+            titolo,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        titolo = re.sub(
+            r"Scadenza:.*",
+            "",
+            titolo,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        titolo = pulisci_testo(titolo)
+
+        if len(titolo) < 20:
+            titolo = testo
+
+        chiave = (titolo.lower(), url.lower())
+
+        if chiave in visti:
+            continue
+
+        visti.add(chiave)
+
+        risultati.append(
+            crea_record(
+                "Emilia-Romagna",
+                titolo,
+                url,
+                testo,
+                stato="Aperto",
+                categoria="CSR 2023-2027 / Sviluppo rurale",
+            )
+        )
+
+    print(f"      Emilia-Romagna: estratti {len(risultati)} bandi")
+    return elimina_duplicati(risultati)
+
+
+def estrai_sardegna(html_pagina, url_base):
+    """
+    Sardegna:
+    portale PSR con card dei bandi, stato e date.
+    Gestisce anche la dicitura 'Proroga scadenza'.
+    """
+    soup = BeautifulSoup(html_pagina, "lxml")
+    risultati = []
+    visti = set()
+
+    for card in soup.find_all(["article", "div", "li"]):
+        testo = pulisci_testo(card.get_text(" ", strip=True))
+        testo_basso = testo.lower()
+
+        if len(testo) < 60:
+            continue
+
+        if "aperto" not in testo_basso:
+            continue
+
+        if contiene_esclusioni(testo):
+            continue
+
+        if not riguarda_agricoltura(testo):
+            continue
+
+        match_misura = re.search(
+            r"\b(?:Intervento\s+)?SR[A-Z]?\s?\d{2}\b",
+            testo,
+            flags=re.IGNORECASE,
+        )
+
+        if not match_misura:
+            continue
+
+        link = card.find("a", href=True)
+
+        if not link:
+            continue
+
+        url = urljoin(url_base, link["href"])
+
+        if url.rstrip("/") == url_base.rstrip("/"):
+            continue
+
+        titolo = pulisci_testo(testo)
+
+        # Taglia il testo dopo la prima data/proroga, se presente.
+        taglio = re.search(
+            r"(Pubblicato il:|Apertura:|Scadenza:|Proroga scadenza:)",
+            titolo,
+            flags=re.IGNORECASE,
+        )
+
+        if taglio:
+            titolo = titolo[: taglio.start()]
+
+        titolo = pulisci_testo(titolo)
+
+        if len(titolo) < 25:
+            continue
+
+        scadenza = "non specificata"
+
+        match_scadenza = re.search(
+            r"(?:Scadenza:|Proroga scadenza:)\s*"
+            r"([0-9]{1,2}\s+[a-zàèéìòù]+\s+[0-9]{4}"
+            r"|[0-9]{1,2}/[0-9]{1,2}/[0-9]{4})",
+            testo,
+            flags=re.IGNORECASE,
+        )
+
+        if match_scadenza:
+            scadenza = pulisci_testo(match_scadenza.group(1))
+
+        stato = "Aperto"
+
+        if "proroga scadenza" in testo_basso:
+            stato = "Aperto – proroga scadenza"
+
+        chiave = (titolo.lower(), url.lower())
+
+        if chiave in visti:
+            continue
+
+        visti.add(chiave)
+
+        risultati.append(
+            crea_record(
+                "Sardegna",
+                titolo,
+                url,
+                testo,
+                stato=stato,
+                categoria="PSR / CSR / Sviluppo rurale",
+            )
+        )
+
+        risultati[-1]["scadenza"] = scadenza
+
+    print(f"      Sardegna: estratti {len(risultati)} bandi")
+    return elimina_duplicati(risultati)
+
+
+def estrai_toscana(html_pagina, url_base):
+    """
+    Toscana:
+    pagina 'Bandi aperti' con schede CSR.
+    """
+    soup = BeautifulSoup(html_pagina, "lxml")
+    risultati = []
+    visti = set()
+
+    for titolo_tag in soup.find_all(["h2", "h3", "h4"]):
+        titolo = pulisci_testo(titolo_tag.get_text(" ", strip=True))
+
+        if len(titolo) < 20:
+            continue
+
+        contenitore = titolo_tag.parent
+        blocco = None
+
+        for _ in range(6):
+            if not contenitore:
+                break
+
+            testo = pulisci_testo(
+                contenitore.get_text(" ", strip=True)
+            )
+
+            if "Scadenza" in testo or "Sportello" in testo:
+                blocco = contenitore
+                break
+
+            contenitore = contenitore.parent
+
+        if not blocco:
+            continue
+
+        testo = pulisci_testo(blocco.get_text(" ", strip=True))
+        testo_basso = testo.lower()
+
+        if contiene_esclusioni(testo):
+            continue
+
+        if not riguarda_agricoltura(testo):
+            continue
+
+        link = titolo_tag.find("a", href=True)
+
+        if not link:
+            link = blocco.find("a", href=True)
+
+        if not link:
+            continue
+
+        url = urljoin(url_base, link["href"])
+
+        if url.rstrip("/") == url_base.rstrip("/"):
+            continue
+
+        stato = "Aperto"
+
+        if "sportello" in testo_basso:
+            stato = "Sportello aperto"
+
+        scadenza = cerca_scadenza(testo)
+
+        chiave = (titolo.lower(), url.lower())
+
+        if chiave in visti:
+            continue
+
+        visti.add(chiave)
+
+        risultati.append(
+            crea_record(
+                "Toscana",
+                titolo,
+                url,
+                testo,
+                stato=stato,
+                categoria="CSR 2023-2027 / Sviluppo rurale",
+            )
+        )
+
+        risultati[-1]["scadenza"] = scadenza
+
+    print(f"      Toscana: estratti {len(risultati)} bandi")
+    return elimina_duplicati(risultati)
 FONTI_HTML = {
     "Basilicata": {
         "url": "https://agricoltura.regione.basilicata.it/bandi-regionali/",
@@ -835,6 +1130,10 @@ FONTI_HTML = {
     "Campania": {
         "url": "https://agricoltura.regione.campania.it/bandi.html",
         "estrattore": estrai_campania,
+    },
+    "Emilia-Romagna": {
+        "url": "https://agricoltura.regione.emilia-romagna.it/sviluppo-rurale-23-27/opportunita/bandi/bandi-aperti",
+        "estrattore": estrai_emilia_romagna,
     },
     "Lombardia": {
         "url": "https://www.bandi.regione.lombardia.it/servizi/servizio/bandi/agricoltura-pesca",
@@ -848,13 +1147,17 @@ FONTI_HTML = {
         "url": "https://csr.regione.puglia.it/bandi",
         "estrattore": estrai_puglia,
     },
+    "Sardegna": {
+        "url": "https://sardegnapsr.it/bandi/",
+        "estrattore": estrai_sardegna,
+    },
     "Sicilia": {
         "url": "https://svilupporurale.regione.sicilia.it/categoria/news/bandi-aperti/",
         "estrattore": estrai_sicilia,
     },
-    "Marche": {
-        "url": "https://www.regione.marche.it/Regione-Utile/Agricoltura-Sviluppo-Rurale-e-Pesca/Bandi-di-finanziamento",
-        "estrattore": estrai_marche,
+    "Toscana": {
+        "url": "https://www.regione.toscana.it/sviluppo-rurale-2023-2027/bandi-aperti",
+        "estrattore": estrai_toscana,
     },
     "Valle d'Aosta": {
         "url": "https://www.regione.vda.it/agricoltura/CSR_2023_2027/bandi_interventi_strutturali/default_i.aspx",
